@@ -1,0 +1,82 @@
+services:
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file: .env
+    command: python -m apps.api.migrate
+    restart: "no"
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file: .env
+    environment:
+      NOACH_ENV: production
+      NOACH_DEMO_MODE: "false"
+      HOSTING_PROVIDER: Vultr
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+  workers:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file: .env
+    command: python -m apps.api.workers
+    environment:
+      NOACH_ENV: production
+      NOACH_DEMO_MODE: "false"
+      HOSTING_PROVIDER: Vultr
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-m", "apps.api.worker_health"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile.production
+    env_file: .env
+    environment:
+      API_BASE_URL: http://api:8000
+      NOACH_ENV: production
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+volumes:
+  caddy_data:
+  caddy_config:

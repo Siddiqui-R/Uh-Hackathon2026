@@ -15,8 +15,11 @@ USGS_URL = "https://waterservices.usgs.gov/nwis/iv/"
 PARAMETER_CODES = "00065,00060,00045"
 ReadingRow = tuple[datetime, str, str, str, float, str]
 INSERT_SQL = """
-    INSERT INTO sensor_readings (time, station_id, hazard, metric, value, unit)
-    VALUES (%s, %s, %s, %s, %s, %s)
+    WITH claimed AS (
+    INSERT INTO reading_identities(time,station_id,hazard,metric)
+    VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING RETURNING 1)
+    INSERT INTO sensor_readings(time,station_id,hazard,metric,value,unit)
+    SELECT %s,%s,%s,%s,%s,%s FROM claimed
 """
 
 
@@ -42,6 +45,8 @@ def parse_readings(payload: dict[str, Any]) -> list[ReadingRow]:
     return rows
 
 
+STATIONS: dict[str, tuple[str, str, float, float]] = {}
+
 def fetch_readings() -> list[ReadingRow]:
     """Fetch once; propagate HTTP, network, JSON, and response-shape failures."""
     with requests.get(
@@ -55,15 +60,27 @@ def fetch_readings() -> list[ReadingRow]:
         timeout=30,
     ) as response:
         response.raise_for_status()
-        return parse_readings(response.json())
+        payload = response.json()
+        STATIONS.clear()
+        for series in payload["value"]["timeSeries"]:
+            source = series["sourceInfo"]
+            code = source["siteCode"][0]["value"]
+            geo = source["geoLocation"]["geogLocation"]
+            STATIONS[code] = (code,source["siteName"],float(geo["latitude"]),float(geo["longitude"]))
+        return parse_readings(payload)
 
 
 def write_readings(database_url: str, rows: list[ReadingRow]) -> int:
     """Commit the batch together; connection context rolls back on any failure."""
     with psycopg.connect(database_url, connect_timeout=30) as conn:
         with conn.cursor() as cursor:
-            cursor.executemany(INSERT_SQL, rows)
-    return len(rows)
+            if STATIONS:
+                cursor.executemany("INSERT INTO stations VALUES (%s,%s,%s,%s) ON CONFLICT(station_id) DO UPDATE SET station_name=EXCLUDED.station_name,lat=EXCLUDED.lat,lon=EXCLUDED.lon",list(STATIONS.values()))
+            cursor.executemany(INSERT_SQL, [row[:4] + row for row in rows])
+            count = cursor.rowcount
+            cursor.execute("""INSERT INTO job_status(job,status,rows_written,last_success) VALUES ('flood_ingestion','ok',%s,now())
+              ON CONFLICT(job) DO UPDATE SET heartbeat=now(),last_success=now(),status='ok',rows_written=EXCLUDED.rows_written""",(count,))
+    return count
 
 
 def main() -> int:

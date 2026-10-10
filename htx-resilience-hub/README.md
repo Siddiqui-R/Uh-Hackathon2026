@@ -1,119 +1,71 @@
-# HTX Resilience Hub
+# noach.select
 
-Hackathon monorepo scaffold for Houston flood conditions, power grid stress, and air quality. Next.js 14 (TypeScript strict mode, App Router, Tailwind, Leaflet), FastAPI, and Tiger Data / TimescaleDB. The dashboard/API hazard queries, AI calls, user memory, and speech remain scaffolds. A standalone USGS flood ingestion worker is implemented. Unknown severity means no data, not safe conditions.
+A personal Houston environmental assistant: save places and routines, plan outdoor activities with weather and modeled air quality, review observed bayou conditions, and receive relevant alerts. The three hazard modules support the recommendations. Live grid and road-closure ingestion are deferred.
 
-## Prerequisites
+## Local setup
 
-Node.js 22+, Python 3.11+, and Docker with Compose v2. Run commands below from `htx-resilience-hub/`.
-
-## Quick start with Docker
-
-```sh
-cp .env.example .env
-npm install
-docker compose up --build
-```
-
-PowerShell: use `Copy-Item .env.example .env` instead of `cp` if needed. The template includes local development database credentials only; use separate secure values for deployed databases. Do not commit `.env` or provider keys.
-
-Open http://localhost:3000. API health: http://localhost:8000/health; OpenAPI: http://localhost:8000/docs. Compose starts all three services, applies `db/migrations/001_init.sql` on a fresh database volume, and waits for the database to become healthy before starting the API. The web container runs the development server for this scaffold.
-
-## Run web and API locally
-
-Start only the database (avoid running container and local servers on the same ports):
-
-```sh
-cp .env.example .env
-docker compose up -d db
-npm install
-npm run dev
-```
-
-In another terminal, from the monorepo root:
-
-```sh
-python -m venv .venv
-# macOS/Linux:
-source .venv/bin/activate
-# Windows PowerShell instead:
-# .\.venv\Scripts\Activate.ps1
-python -m pip install -r apps/api/requirements.txt
-uvicorn apps.api.main:app --reload
-```
-
-Alternatively, after activating the environment, `cd apps/api` and run `uvicorn main:app --reload`. Both entry points load the root `.env`. Next.js also loads the root `.env` for server-side routes. Restart servers after changing environment values.
-
-## Environment
-
-| Variable | Purpose |
-| --- | --- |
-| `DATABASE_URL` | Required at API startup; host development defaults to localhost. Set to your Tiger Data connection URL (including SSL parameters) to use a hosted database. |
-| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | Local Compose database settings. Compose constructs the API database URL with hostname `db`. URL-encode credentials if they contain URL-reserved characters. |
-| `API_BASE_URL` | Required when a Next.js proxy route is called. Local host uses `http://127.0.0.1:8000`; Compose sets `http://api:8000`. |
-| `GEMINI_API_KEY` | Required when `/api/ask` is invoked; a configured key still returns 501 until the integration is implemented. |
-| `ELEVENLABS_API_KEY` | Required when the server-only `speak(text)` stub is invoked. |
-| `BACKBOARD_API_KEY` | Required when server-only user memory stubs are invoked. |
-
-Keys stay server-side and are never prefixed with `NEXT_PUBLIC_`. Missing settings produce named configuration errors. Provider stubs explicitly fail instead of pretending a remote operation succeeded. The API can start without provider keys.
-
-## Layout
-
-```text
-apps/web/                  Next.js dashboard, /api proxies, server-only provider stubs
-apps/api/                  FastAPI entry, async psycopg access, pydantic models
-apps/api/ingest/            USGS flood worker; grid and air stubs (not scheduled)
-db/migrations/001_init.sql  Hypertables, preferences, hourly continuous aggregate
-docker-compose.yml         Local db, api, and web services
-.env.example               Environment template; no real credentials
-```
-
-The browser accesses FastAPI only through Next.js `/api/hazards`, `/api/ask`, and `/api/alerts`. Leaflet loads public OpenStreetMap base tiles directly. Layer toggles are UI placeholders. Alert SSE sends a `ready` event and 15-second heartbeat comments; it does not generate fake hazard alerts. Grid and air ingestion functions return empty typed lists. The flood worker is a standalone one-shot script; no ingestion runs automatically.
-
-API routes: `GET /health`, `GET /api/hazards`, `POST /api/ask` (`question`, optional `user_id`), `GET /api/alerts`. Authentication and user-scoped access are TODOs before deployment.
-
-## Database
-
-`sensor_readings` has 1-day time chunks; `alerts` is another hypertable. `user_prefs` is a regular table. `hourly_station_avg` groups by hourly bucket, station ID, and metric, refreshing hourly across the previous seven days with a one-hour delay. For older history, explicitly refresh the aggregate after backfilling.
-
-The init script only runs automatically for a fresh volume. To apply it manually to the local database:
-
-```sh
-docker compose exec -T db psql -U htx -d htx < db/migrations/001_init.sql
-```
-
-PowerShell equivalent (adjust user/database if changed):
+Use Node.js 22+, Python 3.10+, and optionally Docker Compose v2. Run from this directory.
 
 ```powershell
-Get-Content db/migrations/001_init.sql -Raw | docker compose exec -T db psql -v ON_ERROR_STOP=1 -U htx -d htx
+Copy-Item .env.example .env
+npm ci
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r apps/api/requirements.txt
+# Configure DATABASE_URL and optional providers in the ignored .env.
+.\.venv\Scripts\python.exe -m apps.api.migrate
+.\.venv\Scripts\python.exe tools/dev.py
 ```
 
-For hosted Tiger Data, apply the same SQL using a client configured with `DATABASE_URL`; do not put connection strings in committed scripts.
+Open http://localhost:3000. The supervisor runs the frontend, API and workers. On Linux/macOS use .venv/bin/python instead. Separate terminals can run `npm run dev`, `uvicorn apps.api.main:app --reload`, and `python -m apps.api.workers`. Windows without reload should use `python -m apps.api.run` for psycopg's compatible event loop. Restart after changing configuration.
 
-## Checks
+For a local Timescale database: `docker compose up -d db`. The development Compose stack overrides DATABASE_URL to its local database; never use that stack for Tiger Cloud production. A fresh local volume applies all migration files. Existing databases use the migration runner, which tracks applied filenames under an advisory lock.
+
+## Configuration and data
+
+DATABASE_URL is required. Production also requires INTERNAL_API_TOKEN; generate a random token (e.g. `python -c "import secrets; print(secrets.token_urlsafe(32))"`). Optional integrations need GEMINI_API_KEY plus GEMINI_MODEL, BACKBOARD_API_KEY, and ELEVENLABS_API_KEY plus ELEVENLABS_VOICE_ID. Provider failures retain usable labeled text and database preferences. Model availability varies by provider account; choose a supported Gemini model. Never commit .env, credentials or SSH private keys.
+
+USGS observations cover 08074500, 08074000 and 08075000. Flood inserts claim a unique time/station/hazard/metric identity in the same transaction, avoiding repeated samples. Stations retain USGS metadata. Forecast snapshots use separate retrieval and valid timestamps; weather and AQI from Open-Meteo are model/forecast data, not measured station observations. Apparent temperature is labeled “feels like.” Data older than an hour cannot support a confident recommendation. Hourly flood history reads hourly_station_avg; its hourly refresh can delay recent points.
+
+Workers poll flood and location weather/AQI every 15 minutes and evaluate routines every minute. Activities use America/Chicago by default and local weekdays. Threshold rules trigger alerts; Gemini optionally personalizes explanations. Persistent deduplication keys include user, routine, forecast hour and category. Flood escalation state is persisted. Try demo alert queues a labeled condition for the actual worker; it never changes sensor readings.
+
+## Interfaces and privacy
+
+All browser API calls go through Next.js. Signed HttpOnly session cookies assign each browser an anonymous profile; callers cannot select another user's ID through the web proxy. Direct backend access requires an internal token in production. This is an anonymous hackathon prototype, not multi-device account login: each browser has separate preferences. Keep the backend private and configure provider quotas.
+
+GET /api/hazards preserves the agreed flat array contract. Gage heights greater than 15 ft are warning, greater than 10 ft watch, otherwise normal; these prototype thresholds are not official flood stages. POST /api/ask keeps {question,user_id} → {answer}. Briefing, prefs, status, history, demo-alert and speech routes support the assistant.
+
+Saving places sends coordinates to Open-Meteo for conditions. Optional Backboard memory synchronizes explicitly saved preferences to a separate assistant per user; failures fall back to Tiger preferences. Gemini receives relevant environmental context and preferences for answers. Voice sends displayed text to ElevenLabs only after audio opt-in. Browser notifications work while the page remains running; closed-browser push is deferred.
+
+Commute guidance shows nearby gauges and official links. It never verifies route safety: road closures, water on individual roads and complete route coverage are unavailable. NOACH_DEMO_MODE=true enables explicitly labeled development fallbacks; production disables this. Grid remains a labeled deferred integration.
+
+## Vultr deployment
+
+Use Ubuntu with Docker Engine and Compose installed from the official Docker repository. Copy the source to the VM, then configure deploy/.env.example as .env with Tiger Cloud DATABASE_URL, INTERNAL_API_TOKEN, provider settings, DOMAIN=noach.select and a valid ACME_EMAIL.
+
+```sh
+chmod 600 .env
+docker compose -f compose.production.yml up -d --build
+docker compose -f compose.production.yml ps
+docker compose -f compose.production.yml logs --tail=50 workers
+```
+
+The production stack runs migrations, API, frontend, workers and Caddy. It has restart policies and health checks; only Caddy publishes ports. Allow 80/443 and restrict SSH to trusted operators. In Porkbun create an A record for the root domain pointing to the VM's public IPv4; remove conflicting parking records only after reviewing existing records. Caddy obtains HTTPS once DNS resolves. No local database is created in this stack.
+
+The operations panel shows hosting provider, API/database readiness, latest ingestion, freshness and worker heartbeat without private preferences or keys. A queued demo condition travels through Tiger Cloud → Vultr worker → SSE → the browser. Verify HTTPS on a second device before claiming deployment complete.
+
+## Validation
 
 ```sh
 npm run typecheck
 npm run build
-python -m compileall apps/api
+python -m unittest discover -s apps/api/tests -v
+python -m compileall -q apps/api
 ```
 
-Remaining integration stubs have one-line TODOs. Implement grid/air ingestion, dashboard SQL queries, Gemini grounding, user memory, speech playback, real map overlays, and authenticated alert delivery during the hackathon.
-
-## Flood ingestion worker
-
-`apps/api/ingest/flood.py` fetches USGS instantaneous gage height, discharge, and precipitation for sites 08074500, 08074000, and 08075000 with a 30-second timeout. It skips no-data and invalid numeric readings and inserts the remaining samples in one psycopg transaction. Failures exit non-zero; success prints a row count and UTC timestamp.
-
-Unlike the API entry point, this standalone script reads only the process environment and does not load `.env` automatically. From the monorepo root, with dependencies installed, run in PowerShell:
-
-```powershell
-$env:DATABASE_URL = Read-Host "Enter your database connection URL"
-.\.venv\Scripts\python.exe apps/api/ingest/flood.py
-```
-
-Scheduling is external. Export `DATABASE_URL` in the cron environment and use the interpreter where the dependencies are installed:
+Tests cover threshold boundaries, local forecast alignment, missing/stale data, persistence fallback isolation, deduplication and internal API protection. For one-shot real flood ingestion, export DATABASE_URL and run `python apps/api/ingest/flood.py`; repeated unchanged readings should write zero rows. Scheduling is handled by the worker service, or externally:
 
 ```cron
 */15 * * * * /usr/bin/python3 /path/to/flood.py
 ```
 
-Each run inserts returned samples without deduplication; overlapping polls can store the same observation again. The dashboard hazard endpoint still returns placeholders until its SQL query is implemented.
+Browser notification permission and optional audio must be checked manually on the demo device, including denied permission and failed playback. See deploy/DEMO.md for the rehearsal sequence.

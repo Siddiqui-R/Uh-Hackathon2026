@@ -1,14 +1,8 @@
 import "server-only";
-import { requireEnv } from "./env";
-
 export function backendUrl(path: string): string {
-  return `${requireEnv("API_BASE_URL").replace(/\/$/, "")}${path}`;
+  return `${(process.env.API_BASE_URL || process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "")}${path}`;
 }
-
 export function proxyError(error: unknown): Response {
-  const configurationError = error instanceof Error && error.message.startsWith("Missing required environment variable:");
-  return Response.json(
-    { error: configurationError && error instanceof Error ? error.message : "Backend unavailable. Check API_BASE_URL and start the FastAPI service." },
-    { status: configurationError ? 503 : 502 },
-  );
+  void error;
+  return Response.json({ error: "Backend unavailable. Start the API service and verify API_BASE_URL." }, { status: 502 });
 }
