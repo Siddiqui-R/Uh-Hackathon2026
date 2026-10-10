@@ -3,6 +3,7 @@ import asyncio
 import hmac
 import json
 import os
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -79,6 +80,9 @@ async def preferences_save(prefs: UserPrefs) -> dict:
 @app.get("/api/briefing")
 async def briefing_route(user_id: str = Query(min_length=1,max_length=100)) -> dict:
     try:
+        if os.getenv("VERCEL"):
+            from apps.api.serverless import maintain
+            await maintain()
         return await briefing(user_id)
     except Exception:
         raise HTTPException(503,"Briefing unavailable; check database settings or explicitly enable NOACH_DEMO_MODE")
@@ -103,8 +107,11 @@ async def alert_stream(request: Request,user_id: str = Query(min_length=1,max_le
         cursor_id = after
     async def events() -> AsyncIterator[str]:
         nonlocal cursor_id
+        started = time.monotonic()
         yield 'event: ready\ndata: {"status":"connected"}\n\n'
         while not await request.is_disconnected():
+            if os.getenv("VERCEL") and time.monotonic() - started >= 240:
+                break  # EventSource reconnects with Last-Event-ID.
             try:
                 for alert in await alerts_after(user_id,cursor_id):
                     cursor_id = int(alert["id"])
@@ -125,6 +132,9 @@ async def demo_alert(payload: AskRequest) -> dict:
         request_id = str(uuid4())
         async with connection() as conn:
             await conn.execute("INSERT INTO demo_requests(id,user_id) VALUES (%s,%s)",(request_id,user_id))
+        if os.getenv("VERCEL"):
+            from apps.api.serverless import maintain
+            await maintain(force_alerts=True)
         return {"status":"queued","demo":True,"request_id":request_id}
     except Exception:
         if not demo_mode():

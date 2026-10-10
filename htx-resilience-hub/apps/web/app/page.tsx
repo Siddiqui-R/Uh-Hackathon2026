@@ -170,7 +170,7 @@ export default function Home() {
           <p className="tiny">{view?.coverage}</p>
         </details>
       </section>
-      <details className="panel operations"><summary><span><span className="live-dot" /> Always working between questions</span><span className="tiny">{operations?.hosting ?? "Checking deployment"} · View system status +</span></summary>
+      <details className="panel operations"><summary><span><span className="live-dot" /> Keeping your context current</span><span className="tiny">{operations?.hosting ?? "Checking deployment"} · View system status +</span></summary>
         <p className="muted">The cloud workers collect environmental data every 15 minutes and evaluate routines every minute.</p>
         <div className="status-grid"><div><span className="tiny">API</span><strong>{operations?.api ?? "unavailable"}</strong></div><div><span className="tiny">Tiger Data</span><strong>{operations?.database ?? "unavailable"}</strong></div><div><span className="tiny">Latest flood observation</span><strong>{operations?.latest_flood_observation ? localTime(operations.latest_flood_observation) : "No observation"}</strong></div></div>
         {operations?.jobs.map((job) => <p key={job.job} className="tiny">{job.job.replaceAll("_", " ")} · {job.status} · heartbeat {localTime(job.heartbeat)} · last success {job.last_success ? localTime(job.last_success) : "never"} · {job.rows_written} rows</p>)}
