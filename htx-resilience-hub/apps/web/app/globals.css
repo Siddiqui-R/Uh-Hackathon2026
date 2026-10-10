@@ -1,0 +1,6 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body { background: #f1f5f9; color: #0f172a; }
+.leaflet-container { height: 100%; width: 100%; z-index: 0; }

@@ -1,0 +1,12 @@
+{
+  "name": "htx-resilience-hub",
+  "private": true,
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @htx/web",
+    "build": "npm run build --workspace @htx/web",
+    "typecheck": "npm run typecheck --workspace @htx/web"
+  }
+}

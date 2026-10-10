@@ -1,2 +1,3 @@
 # Uh-Hackathon2026
-Uh-Hackathon
+
+The project scaffold lives in [htx-resilience-hub](htx-resilience-hub/README.md).
