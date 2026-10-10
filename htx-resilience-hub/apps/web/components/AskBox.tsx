@@ -1,5 +1,15 @@
 "use client";
 import { useState } from "react";
+function Answer({ text }: { text: string }) {
+  const parts = text.split(/(\[[^\]]+\]\(https:\/\/[^)\s]+\)|\*\*[^*]+\*\*|https:\/\/[^\s)]+)/g);
+  return <p className="answer-text">{parts.map((part, index) => {
+    const link = part.match(/^\[([^\]]+)\]\((https:\/\/[^)]+)\)$/);
+    if (link) return <a key={index} href={link[2]} target="_blank" rel="noreferrer">{link[1]}</a>;
+    if (part.startsWith("https://")) return <a key={index} href={part} target="_blank" rel="noreferrer">{part}</a>;
+    if (part.startsWith("**") && part.endsWith("**")) return <strong key={index}>{part.slice(2,-2)}</strong>;
+    return part;
+  })}</p>;
+}
 export default function AskBox() {
   const [question, setQuestion] = useState(""), [busy, setBusy] = useState(false);
   const [messages, setMessages] = useState<{ question: string; answer: string; provider: string }[]>([]);
@@ -27,7 +37,7 @@ export default function AskBox() {
     <div className="chat-thread" aria-live="polite">
       {messages.map((message, index) => <article key={index} className="chat-message">
         <p className="question-label">{message.question}</p><span className="tag">{message.provider === "gemini" ? "Gemini · grounded in your briefing" : message.provider}</span>
-        <p className="answer-text">{message.answer}</p>
+        <Answer text={message.answer} />
       </article>)}
     </div>
     <form className="ask-form" onSubmit={(event) => { event.preventDefault(); void ask(question); }}>
