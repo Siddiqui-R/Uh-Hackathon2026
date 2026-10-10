@@ -1,6 +1,6 @@
 # HTX Resilience Hub
 
-Hackathon monorepo scaffold for Houston flood conditions, power grid stress, and air quality. Next.js 14 (TypeScript strict mode, App Router, Tailwind, Leaflet), FastAPI, and Tiger Data / TimescaleDB. No live hazard feeds, AI calls, user memory, or speech are implemented. Unknown severity means no data, not safe conditions.
+Hackathon monorepo scaffold for Houston flood conditions, power grid stress, and air quality. Next.js 14 (TypeScript strict mode, App Router, Tailwind, Leaflet), FastAPI, and Tiger Data / TimescaleDB. The dashboard/API hazard queries, AI calls, user memory, and speech remain scaffolds. A standalone USGS flood ingestion worker is implemented. Unknown severity means no data, not safe conditions.
 
 ## Prerequisites
 
@@ -61,13 +61,13 @@ Keys stay server-side and are never prefixed with `NEXT_PUBLIC_`. Missing settin
 ```text
 apps/web/                  Next.js dashboard, /api proxies, server-only provider stubs
 apps/api/                  FastAPI entry, async psycopg access, pydantic models
-apps/api/ingest/            Flood, grid, and air ingestion stubs (not scheduled)
+apps/api/ingest/            USGS flood worker; grid and air stubs (not scheduled)
 db/migrations/001_init.sql  Hypertables, preferences, hourly continuous aggregate
 docker-compose.yml         Local db, api, and web services
 .env.example               Environment template; no real credentials
 ```
 
-The browser accesses FastAPI only through Next.js `/api/hazards`, `/api/ask`, and `/api/alerts`. Leaflet loads public OpenStreetMap base tiles directly. Layer toggles are UI placeholders. Alert SSE sends a `ready` event and 15-second heartbeat comments; it does not generate fake hazard alerts. Ingestion functions return empty typed lists and do not run automatically.
+The browser accesses FastAPI only through Next.js `/api/hazards`, `/api/ask`, and `/api/alerts`. Leaflet loads public OpenStreetMap base tiles directly. Layer toggles are UI placeholders. Alert SSE sends a `ready` event and 15-second heartbeat comments; it does not generate fake hazard alerts. Grid and air ingestion functions return empty typed lists. The flood worker is a standalone one-shot script; no ingestion runs automatically.
 
 API routes: `GET /health`, `GET /api/hazards`, `POST /api/ask` (`question`, optional `user_id`), `GET /api/alerts`. Authentication and user-scoped access are TODOs before deployment.
 
@@ -97,4 +97,23 @@ npm run build
 python -m compileall apps/api
 ```
 
-Every integration stub has a one-line TODO. Implement ingestion, SQL queries, Gemini grounding, user memory, speech playback, real map overlays, and authenticated alert delivery during the hackathon.
+Remaining integration stubs have one-line TODOs. Implement grid/air ingestion, dashboard SQL queries, Gemini grounding, user memory, speech playback, real map overlays, and authenticated alert delivery during the hackathon.
+
+## Flood ingestion worker
+
+`apps/api/ingest/flood.py` fetches USGS instantaneous gage height, discharge, and precipitation for sites 08074500, 08074000, and 08075000 with a 30-second timeout. It skips no-data and invalid numeric readings and inserts the remaining samples in one psycopg transaction. Failures exit non-zero; success prints a row count and UTC timestamp.
+
+Unlike the API entry point, this standalone script reads only the process environment and does not load `.env` automatically. From the monorepo root, with dependencies installed, run in PowerShell:
+
+```powershell
+$env:DATABASE_URL = Read-Host "Enter your database connection URL"
+.\.venv\Scripts\python.exe apps/api/ingest/flood.py
+```
+
+Scheduling is external. Export `DATABASE_URL` in the cron environment and use the interpreter where the dependencies are installed:
+
+```cron
+*/15 * * * * /usr/bin/python3 /path/to/flood.py
+```
+
+Each run inserts returned samples without deduplication; overlapping polls can store the same observation again. The dashboard hazard endpoint still returns placeholders until its SQL query is implemented.
