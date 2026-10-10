@@ -2,6 +2,8 @@
 
 A personal Houston environmental assistant: save places and routines, plan outdoor activities with weather and modeled air quality, review observed bayou conditions, and receive relevant alerts. The three hazard modules support the recommendations. Live grid and road-closure ingestion are deferred.
 
+Team progress: [delivery checklist](https://github.com/Siddiqui-R/Uh-Hackathon2026/issues/6). Each remaining workstream has an owner, acceptance checks and a linked GitHub issue. Claim your task, check verified steps and close the issue when its acceptance checks pass.
+
 ## Local setup
 
 Use Node.js 22+, Python 3.10+, and optionally Docker Compose v2. Run from this directory.
