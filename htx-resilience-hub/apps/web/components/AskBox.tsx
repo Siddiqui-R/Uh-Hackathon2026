@@ -27,9 +27,9 @@ export default function AskBox() {
     } finally { setBusy(false); }
   }
   return <section className="panel assistant-panel" aria-labelledby="assistant-title">
-    <div className="section-label"><span className="orange-dot" /> YOUR ENVIRONMENTAL ASSISTANT</div>
-    <h2 id="assistant-title">A little context.<br /><span>A better decision.</span></h2>
-    <p className="muted">Ask about your plans. I’ll use local conditions and the routines you choose to remember.</p>
+    <div className="section-label">02 / ASK ABOUT YOUR PLAN</div>
+    <h2 id="assistant-title">Ask before<br /><span>you head out.</span></h2>
+    <p className="muted">Your copilot uses available conditions and the places and routines you save.</p>
     <div className="prompt-chips">
       {["Should I play basketball near UH at 5 PM?", "What should I check before driving to UH?"].map((text) =>
         <button key={text} disabled={busy} onClick={() => void ask(text)}>{text} <span aria-hidden>↗</span></button>)}

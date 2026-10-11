@@ -19,7 +19,7 @@ class HazardReading(SensorReading):
     station_name: str
     lat: float
     lon: float
-    severity: Severity
+    severity: Severity | Literal["unrated"]
 
 class Location(BaseModel):
     id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,40}$")
@@ -85,6 +85,13 @@ class Alert(BaseModel):
     station_id: str | None = None
     suggestions: list[Suggestion] = Field(default_factory=list)
     demo: bool = False
+    read_at: datetime | None = None
+
+
+class AlertReadRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=100)
+    alert_id: int = Field(gt=0)
+    read: bool
 
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4000)

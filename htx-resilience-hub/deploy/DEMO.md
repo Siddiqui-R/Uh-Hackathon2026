@@ -1,10 +1,10 @@
-# noach.select: two-minute rehearsal
+# Noach Select: two-minute rehearsal
 
 1. Save UH and a basketball routine at 5 PM. Explain the daily decision the assistant supports.
 2. Show the recommendation, modeled weather/AQI, feels-like temperature, timestamps and alternative time. Ask the basketball question; identify Gemini or the displayed fallback honestly.
 3. Expand the map and USGS observations. Ask what to check before driving to UH; explain missing road-closure coverage and show official links.
-4. Opt into notifications and optional audio. Queue Try demo alert early: the actual evaluator processes it within a minute. Show the labeled simulation and voice briefing; text remains usable when audio fails.
-5. Show the operations panel and Vultr worker logs. “Vultr keeps noach.select working between questions: collecting conditions, evaluating routines, and delivering timely briefings.”
+4. Save UH as a place. In Live monitor, run the labeled PM2.5 and bayou-rise simulations. Show each synthetic reading, station baseline, map ring and nearby in-app alert; synthetic samples never enter real sensor history. Explain that a rapid gage-height rise is not an official flood warning or a road-safety finding.
+5. Opt into notifications and optional audio, then show the operations panel and Vultr worker logs. Explain that the Vultr worker collects conditions, detects unusual readings, evaluates routines and delivers alerts.
 
 Verify the public HTTPS experience on a second device. Each browser has its own anonymous profile. Verify provider readiness before sponsor claims; keep keys and private coordinates out of recordings. Make a backup recording and rehearse twice.
 

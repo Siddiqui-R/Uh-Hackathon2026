@@ -3,8 +3,8 @@ import "leaflet/dist/leaflet.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "noach.select",
-  description: "Your personal Houston environmental assistant: everyday plans, local context, proactive alerts.",
+  title: "Noach Select | Houston environmental intelligence",
+  description: "Plan outdoor activities with Houston weather, air and bayou context, and receive alerts when nearby conditions change.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

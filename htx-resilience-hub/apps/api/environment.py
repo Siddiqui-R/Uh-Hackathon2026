@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 from .db import connection
 from .models import Location
-from .store import demo_mode
+from .store import demo_mode, temporary_storage
 
 UTC = timezone.utc
 UH = Location(id="uh",name="University of Houston",kind="school",lat=29.7199,lon=-95.3422)
@@ -15,9 +15,6 @@ CACHE: dict[str, tuple[datetime, dict[str, Any]]] = {}
 
 def location_key(location: Location) -> str:
     return hashlib.sha256(f"{location.lat:.5f},{location.lon:.5f}".encode()).hexdigest()[:24]
-
-def severity(value: float) -> str:
-    return "warning" if value > 15 else "watch" if value > 10 else "normal"
 
 def distance(a: Location, b: dict[str, Any]) -> float:
     lat1, lat2 = math.radians(a.lat), math.radians(b["lat"])
@@ -29,25 +26,27 @@ def fresh(timestamp: str | datetime, now: datetime | None = None) -> bool:
     stamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00")) if isinstance(timestamp,str) else timestamp
     return stamp.tzinfo is not None and timedelta(0) <= (now or datetime.now(UTC))-stamp <= timedelta(minutes=60)
 
+def public_hazards(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    # No one-size-fits-all stage threshold is valid across USGS stations.
+    return [{**row, "severity": "unrated", "time": row["time"].isoformat()} for row in rows]
+
 async def hazards() -> tuple[list[dict[str, Any]], str]:
     try:
+        if temporary_storage():
+            raise RuntimeError("No database in temporary demo mode")
         async with connection() as conn:
             cursor = await conn.execute("""WITH latest AS (
               SELECT DISTINCT ON(station_id,metric) * FROM sensor_readings
               WHERE hazard='flood' ORDER BY station_id,metric,time DESC)
               SELECT l.*,s.station_name,s.lat,s.lon FROM latest l JOIN stations s USING(station_id)""")
             rows = await cursor.fetchall()
-        gages = {r["station_id"]: severity(r["value"]) for r in rows if "gage height" in r["metric"].lower() and r["unit"] == "ft"}
-        for row in rows:
-            row["severity"] = gages.get(row["station_id"], "normal")
-            row["time"] = row["time"].isoformat()
-        return rows, "live" if rows else "unavailable"
+        return public_hazards(rows), "live" if rows else "unavailable"
     except Exception:
         if not demo_mode():
             return [], "unavailable"
         return [{"hazard":"flood","station_id":"08074500","station_name":"Whiteoak Bayou at Houston (demo)",
           "lat":29.7752,"lon":-95.3972,"metric":"Gage height, feet","value":7.71,"unit":"ft",
-          "severity":"normal","time":datetime.now(UTC).isoformat()}], "demo"
+          "severity":"unrated","time":datetime.now(UTC).isoformat()}], "demo"
 
 async def forecast(location: Location, force: bool = False) -> dict[str, Any]:
     key,now = location_key(location),datetime.now(UTC)
@@ -89,11 +88,14 @@ async def forecast(location: Location, force: bool = False) -> dict[str, Any]:
                 "source_status":statuses,"attribution":"Weather: Open-Meteo. Air quality: CAMS / Open-Meteo modeled forecasts, not a local sensor.",
                 "source_url":"https://open-meteo.com/en/docs/air-quality-api","storage":"unavailable"}
     if any(s == "live model" for s in statuses.values()):
-        try:
-            await save_forecast(location,snapshot)
-            snapshot["storage"] = "database"
-        except Exception:
-            snapshot["storage"] = "unavailable"
+        if temporary_storage():
+            snapshot["storage"] = "temporary (not persisted)"
+        else:
+            try:
+                await save_forecast(location,snapshot)
+                snapshot["storage"] = "database"
+            except Exception:
+                snapshot["storage"] = "unavailable"
     CACHE[key] = (now,snapshot)
     return snapshot
 

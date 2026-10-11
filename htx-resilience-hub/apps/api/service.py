@@ -16,4 +16,4 @@ async def briefing(user_id: str) -> dict[str,Any]:
       "forecasts":forecasts,"hazards":flood,"recommendations":build_recommendations(prefs,forecasts,flood,now),
       "source_status":{"flood":mode,"grid":"demo; live integration deferred", "weather":"live model" if any(f["source_status"].get("weather")=="live model" for f in forecasts) else "unavailable",
                        "air":"live model" if any(f["source_status"].get("air")=="live model" for f in forecasts) else "unavailable", "preferences":storage},
-      "coverage":"No road-closure feed or route safety assessment. Flood thresholds are app thresholds, not official flood stages."}
+      "coverage":"Gage heights are station-specific observations without flood-stage ratings here. No road-closure feed or route safety assessment."}

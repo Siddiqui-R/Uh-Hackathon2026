@@ -2,19 +2,22 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import AskBox from "@/components/AskBox";
+import ActivityComparison from "@/components/ActivityComparison";
 import PreferencesEditor from "@/components/PreferencesEditor";
 import ModuleCard from "@/components/ModuleCard";
 import { demoBriefing, initialPreferences } from "@/lib/demo";
-import type { Briefing, EnvironmentalAlert, HazardReading, Operations, UserPrefs } from "@/lib/types";
+import type { AirStation, AnomalyEvent, Briefing, EnvironmentalAlert, HazardReading, Operations, UserPrefs } from "@/lib/types";
 
 const HazardMap = dynamic(() => import("@/components/HazardMap"), { ssr: false, loading: () => <div className="map-loading">Loading Houston map…</div> });
 function localTime(value: string, zone = "America/Chicago"): string {
   return new Date(value).toLocaleTimeString("en-US", { timeZone: zone, hour: "numeric", minute: "2-digit" });
 }
+function localDateTime(value: string, zone = "America/Chicago"): string {
+  return new Intl.DateTimeFormat("en-US", { timeZone: zone, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
+}
 function featuredGauge(rows: HazardReading[]): HazardReading | undefined {
-  const rank = { normal: 0, watch: 1, warning: 2 };
-  return rows.filter((row) => row.metric.toLowerCase().includes("gage height"))
-    .sort((left, right) => rank[right.severity] - rank[left.severity] || Date.parse(right.time) - Date.parse(left.time))[0];
+  return rows.filter((row) => row.metric.toLowerCase().includes("gage height") && row.unit === "ft")
+    .sort((left, right) => Date.parse(right.time) - Date.parse(left.time))[0];
 }
 function Sparkline({ points }: { points: { time: string; value: number }[] }) {
   if (points.length < 2) return <p className="tiny">Hourly history will appear after enough observations are aggregated.</p>;
@@ -27,16 +30,26 @@ export default function Home() {
   const [briefing, setBriefing] = useState<Briefing | null>(null), [prefs, setPrefs] = useState(initialPreferences);
   const [operations, setOperations] = useState<Operations | null>(null), [error, setError] = useState("");
   const [alerts, setAlerts] = useState<EnvironmentalAlert[]>([]), [stream, setStream] = useState("Connecting");
+  const [readingId, setReadingId] = useState<string | null>(null);
   const [notifications, setNotifications] = useState("Enable notifications"), [voice, setVoice] = useState(false);
   const [audioBusy, setAudioBusy] = useState(false), [audioError, setAudioError] = useState("");
   const [history, setHistory] = useState<{ time: string; value: number }[]>([]);
+  const [anomalies, setAnomalies] = useState<AnomalyEvent[]>([]), [airStations, setAirStations] = useState<AirStation[]>([]);
+  const [monitorStatus, setMonitorStatus] = useState("Connecting"), [demoBusy, setDemoBusy] = useState(false);
   const voiceRef = useRef(false), audioRef = useRef<HTMLAudioElement | null>(null), audioUrl = useRef<string | null>(null);
   const lastId = useRef(0);
+  const knownAlertIds = useRef<Set<string>>(new Set());
+  const readOverrides = useRef<Map<string, string | null>>(new Map());
+  const alertCacheKey = useRef<string | null>(null);
   const view = briefing;
   const forecast = view?.forecasts[0], current = forecast?.hours[0];
   const gauge = featuredGauge(view?.hazards ?? []);
   const gaugeStale = gauge && Date.now() - Date.parse(gauge.time) > 3_600_000;
-  const demo = view && Object.values(view.source_status).some((s) => s === "demo");
+  const observedAir = airStations.filter((station) => station.fresh).sort((a, b) => Date.parse(b.time) - Date.parse(a.time))[0];
+  const demo = view?.source_status.weather === "demo" && view.source_status.air === "demo";
+  const hasDemoSource = view && Object.values(view.source_status).some((s) => s === "demo");
+  const temporary = view?.source_status.preferences === "temporary memory";
+  const unreadCount = alerts.filter((alert) => !alert.read_at).length;
 
   const refresh = useCallback(async () => {
     try {
@@ -53,7 +66,14 @@ export default function Home() {
       setError(failure instanceof Error ? failure.message : "Unable to connect");
       setBriefing(demoBriefing()); setHistory([]);
     }
-    try { const response = await fetch("/api/status"); if (response.ok) setOperations(await response.json() as Operations); } catch { setOperations(null); }
+    const [statusResult, anomaliesResult, airResult] = await Promise.allSettled([
+      fetch("/api/status", { cache: "no-store" }), fetch("/api/anomalies", { cache: "no-store" }),
+      fetch("/api/air/stations", { cache: "no-store" }),
+    ]);
+    if (statusResult.status === "fulfilled" && statusResult.value.ok) setOperations(await statusResult.value.json() as Operations);
+    else setOperations(null);
+    if (anomaliesResult.status === "fulfilled" && anomaliesResult.value.ok) setAnomalies(await anomaliesResult.value.json() as AnomalyEvent[]);
+    if (airResult.status === "fulfilled" && airResult.value.ok) setAirStations(await airResult.value.json() as AirStation[]);
   }, []);
 
   const play = useCallback(async (text: string) => {
@@ -71,44 +91,88 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    let events: EventSource | null = null, interval: ReturnType<typeof setInterval> | null = null, cancelled = false;
+    let events: EventSource | null = null, anomalyEvents: EventSource | null = null, interval: ReturnType<typeof setInterval> | null = null, cancelled = false;
     async function init() {
+      let cacheKey: string | null = null;
       try {
         await fetch("/api/session");
         const response = await fetch("/api/prefs");
         if (response.ok) {
           const payload = await response.json() as { preferences: UserPrefs };
+          cacheKey = `guardian_alerts_v3:${payload.preferences.user_id}`;
           if (!cancelled) setPrefs(payload.preferences.locations.length ? payload.preferences : { ...initialPreferences, user_id: payload.preferences.user_id });
         }
       } catch { /* Labeled frontend preview remains available. */ }
       if (cancelled) return;
-      lastId.current = Number(sessionStorage.getItem("noach_last_alert") ?? "0") || 0;
-      try { setAlerts(JSON.parse(sessionStorage.getItem("noach_alerts") ?? "[]") as EnvironmentalAlert[]); } catch { setAlerts([]); }
+      alertCacheKey.current = cacheKey;
+      lastId.current = 0;
+      try {
+        const cached = cacheKey ? JSON.parse(sessionStorage.getItem(cacheKey) ?? "[]") as EnvironmentalAlert[] : [];
+        knownAlertIds.current = new Set(cached.map((alert) => alert.id));
+        setAlerts(cached);
+      } catch { knownAlertIds.current = new Set(); setAlerts([]); }
       void refresh(); interval = setInterval(() => void refresh(), 60_000);
-      events = new EventSource("/api/alerts?after=" + lastId.current);
+      const streamOpenedAt = Date.now();
+      events = new EventSource("/api/alerts?after=0");
       events.addEventListener("ready", () => setStream("Connected"));
       events.addEventListener("status", () => setStream("Alert storage unavailable"));
       events.onerror = () => setStream("Reconnecting");
       events.addEventListener("alert", (event) => {
         let alert: EnvironmentalAlert;
         try { alert = JSON.parse((event as MessageEvent<string>).data) as EnvironmentalAlert; } catch { return; }
+        if (readOverrides.current.has(alert.id)) alert = { ...alert, read_at: readOverrides.current.get(alert.id) };
         if (Number(alert.id) <= lastId.current) return;
-        lastId.current = Number(alert.id); sessionStorage.setItem("noach_last_alert", alert.id);
-        setAlerts((old) => { const next = [alert, ...old].slice(0, 12); sessionStorage.setItem("noach_alerts", JSON.stringify(next)); return next; });
-        const recent = Date.now() - new Date(alert.time).getTime() < 120_000;
+        lastId.current = Number(alert.id);
+        const alreadyKnown = knownAlertIds.current.has(alert.id);
+        knownAlertIds.current.add(alert.id);
+        setAlerts((old) => {
+          const next = [alert, ...old.filter((entry) => entry.id !== alert.id)].sort((left, right) => Number(right.id) - Number(left.id)).slice(0, 12);
+          if (alertCacheKey.current) sessionStorage.setItem(alertCacheKey.current, JSON.stringify(next));
+          return next;
+        });
+        const alertTime = new Date(alert.time).getTime();
+        const recent = !alreadyKnown && alertTime >= streamOpenedAt && Date.now() - alertTime < 120_000;
         if (recent && "Notification" in window && Notification.permission === "granted") {
-          const notice = new Notification(alert.demo ? "DEMO · noach.select" : "noach.select · conditions changed", {
-            body: alert.message, tag: `noach:${alert.location_id}:${alert.hazard}`,
+          const notice = new Notification(alert.demo ? "DEMO · Noach Select" : "Noach Select · conditions changed", {
+            body: alert.message, tag: `guardian:${alert.location_id}:${alert.hazard}`,
           });
           notice.onclick = () => { window.focus(); document.getElementById("alerts")?.scrollIntoView({ behavior: "smooth" }); notice.close(); };
         }
         if (recent && voiceRef.current) void play((alert.demo ? "Demonstration alert. " : "") + alert.message);
         void refresh();
       });
+      anomalyEvents = new EventSource("/api/anomalies/stream");
+      anomalyEvents.addEventListener("ready", () => setMonitorStatus("Live"));
+      anomalyEvents.addEventListener("status", () => setMonitorStatus("Data unavailable"));
+      anomalyEvents.onerror = () => setMonitorStatus("Reconnecting");
+      anomalyEvents.addEventListener("anomaly", (event) => {
+        try {
+          const anomaly = JSON.parse((event as MessageEvent<string>).data) as AnomalyEvent;
+          setAnomalies((old) => [anomaly, ...old.filter((entry) => entry.id !== anomaly.id)].slice(0, 20));
+        } catch { /* Ignore malformed stream events. */ }
+      });
     }
     void init();
-    return () => { cancelled = true; events?.close(); if (interval) clearInterval(interval); audioRef.current?.pause(); if (audioUrl.current) URL.revokeObjectURL(audioUrl.current); };
+    return () => { cancelled = true; events?.close(); anomalyEvents?.close(); if (interval) clearInterval(interval); audioRef.current?.pause(); if (audioUrl.current) URL.revokeObjectURL(audioUrl.current); };
   }, [play, refresh]);
+
+  async function toggleAlertRead(alert: EnvironmentalAlert) {
+    const read = !alert.read_at;
+    setReadingId(alert.id);
+    try {
+      const response = await fetch("/api/alerts/read", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ alert_id: Number(alert.id), read }) });
+      if (!response.ok) throw new Error("Could not update this alert. Please try again.");
+      const updated = await response.json() as { id: string; read_at: string | null };
+      readOverrides.current.set(updated.id, updated.read_at);
+      setAlerts((old) => {
+        const next = old.map((item) => item.id === updated.id ? { ...item, read_at: updated.read_at } : item);
+        if (alertCacheKey.current) sessionStorage.setItem(alertCacheKey.current, JSON.stringify(next));
+        return next;
+      });
+    } catch (failure: unknown) { setError(failure instanceof Error ? failure.message : "Alert update unavailable"); }
+    finally { setReadingId(null); }
+  }
 
   async function save(value: UserPrefs): Promise<string> {
     const response = await fetch("/api/prefs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
@@ -122,53 +186,62 @@ export default function Home() {
     try { const permission = await Notification.requestPermission(); setNotifications(permission === "granted" ? "Notifications enabled" : "Notifications not enabled"); }
     catch { setNotifications("Notifications unavailable"); }
   }
-  async function sendDemo() {
+  async function sendDemo(kind: "air" | "flood") {
+    setDemoBusy(true);
     try {
-      const response = await fetch("/api/alerts/demo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: "Explicit demo alert" }) });
-      if (!response.ok) throw new Error("Demo alert could not reach the worker storage. Start the backend and apply migrations.");
-      setError("Demo alert queued. The worker will deliver it within a minute; local fallback delivery is labeled separately.");
-    } catch (failure: unknown) { setError(failure instanceof Error ? failure.message : "Demo alert unavailable"); }
+      const response = await fetch("/api/demo/simulate-anomaly", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind }) });
+      if (!response.ok) throw new Error(response.status === 404 ? "Simulation is disabled in this environment." : "Simulation needs the backend, database and latest migration.");
+      const result = await response.json() as { event?: AnomalyEvent };
+      if (result.event) setAnomalies((old) => [result.event!, ...old.filter((event) => event.id !== result.event!.id)].slice(0, 20));
+      setError(`DEMO: A synthetic ${kind === "flood" ? "gage-height rise" : "PM2.5 spike"} passed through the detector. Nearby saved places receive an in-app alert.`);
+    } catch (failure: unknown) { setError(failure instanceof Error ? failure.message : "Demo anomaly unavailable"); }
+    finally { setDemoBusy(false); }
   }
 
   return <div className="app-shell">
-    <header className="site-header"><a href="/" className="wordmark">noach<span className="orange-dot" />select</a><nav aria-label="Main navigation"><a href="#today">Today</a><a href="#evidence">Conditions</a><a href="#alerts">Alerts <span className="nav-count">{alerts.length}</span></a></nav><span className="header-location">HOUSTON, TX <span className="live-dot" /></span></header>
+    <header className="site-header"><a href="/" className="wordmark"><span className="brand-icon">✳</span> Noach Select</a><nav aria-label="Main navigation"><a href="#today">Overview</a><a href="#your-plan">Your plan</a><a href="#monitor">Live monitor</a><a href="#alerts">Alerts <span className="nav-count" aria-label={`${unreadCount} unread alerts`}>{unreadCount}</span></a></nav><span className="header-location"><span className="live-dot" /> HOUSTON, TX</span></header>
     <main>
-      <section className="hero" id="today"><div><p className="section-label">YOUR DAY, WITH A LITTLE MORE CLARITY</p><h1>Good plans start with<br /><em>knowing your surroundings.</em></h1><p className="hero-copy">Your personal environmental assistant. Local conditions,<br className="desktop-break" /> thoughtful recommendations, and a heads-up when things change.</p></div><div className="hero-stamp"><span className="stamp-symbol" aria-hidden>↗</span><span>SMALL DECISIONS.<br />A MORE RESILIENT HOUSTON.</span></div></section>
+      <section className="hero" id="today"><div><p className="section-label">ENVIRONMENTAL INTELLIGENCE FOR HOUSTON</p><h1>Know what’s changing.<br /><em>Plan around it.</em></h1><p className="hero-copy">Weather, air and bayou conditions in one place. Get a grounded answer for your plans and a heads-up when a nearby reading changes.</p><div className="hero-actions"><a className="primary" href="#your-plan">Plan an activity ↗</a><a className="secondary" href="#monitor">Explore live monitor</a></div></div><div className="hero-stamp"><span className="stamp-symbol" aria-hidden>◎</span><span>LOCAL SIGNALS<br />BETTER DECISIONS</span></div></section>
       {error && <div className="notice" role="status">{error}</div>}
-      {demo && <div className="notice">Demo data is visible. Simulated values are not live observations.</div>}
-      <div className="workspace">
+      {hasDemoSource && <div className="notice">Demo data is visible. Simulated values are not live observations.</div>}
+      {temporary && <div className="notice">Local rehearsal: saved plans, simulated events and alerts are temporary and reset when the API restarts. Weather and AQI are live modeled forecasts only when labeled as such.</div>}
+      <section className="conditions" aria-label="Current environmental conditions"><div className="section-heading"><div><p className="section-label">01 / THE CURRENT PICTURE</p><h2>Houston at a glance</h2></div><span className="tiny">Forecasts and observations are labeled separately</span></div>
+        <div className="module-grid">
+          <ModuleCard title="Temperature" value={current?.temperature_2m !== undefined ? Math.round(current.temperature_2m) + "°F" : "Unavailable"} status={view?.source_status.weather ?? "connecting"} caption={forecast ? `${forecast.location.name} · ${demo ? "illustrative preview" : "Open-Meteo forecast"} · ${localTime(forecast.retrieved_at)}` : "Awaiting forecast"} />
+          <ModuleCard title="Air quality" value={observedAir ? observedAir.value.toFixed(1) + " µg/m³" : current?.us_aqi !== undefined ? Math.round(current.us_aqi) + " US AQI" : "Unavailable"} status={observedAir ? "observed PM2.5" : view?.source_status.air ?? "connecting"} caption={observedAir ? `${observedAir.station_name} · AirNow · ${localTime(observedAir.time)}` : demo ? "Illustrative preview · not a live AQI" : "Modeled AQI forecast · CAMS / Open-Meteo"} accent="orange" />
+          <ModuleCard title="Bayou gauge" value={gauge ? gauge.value.toFixed(2) + " ft" : "Unavailable"} status={gaugeStale ? "stale observation" : view?.source_status.flood ?? "connecting"} caption={gauge ? `${gauge.station_name} · ${demo ? "illustrative preview" : "USGS observed"} · stage not rated · ${localTime(gauge.time)}` : "Awaiting USGS observation"} />
+        </div>
+      </section>
+      <div className="workspace" id="your-plan">
         <AskBox />
-        <section className="panel briefing-panel"><div className="panel-heading"><div><p className="section-label">THE DAILY BRIEF</p><h2>What should I do today?</h2></div><span className="brief-icon" aria-hidden>☀</span></div>
-          <div className="weather-strip"><div><span className="big-number">{current?.temperature_2m !== undefined ? Math.round(current.temperature_2m) + "°" : "—"}</span><span className="tiny">{forecast?.location.name ?? "Houston"} · model forecast</span></div><div><strong>{current?.apparent_temperature !== undefined ? Math.round(current.apparent_temperature) + "°F" : "—"}</strong><span className="tiny">Feels like</span></div><div><strong>{current?.us_aqi !== undefined ? Math.round(current.us_aqi) : "—"}</strong><span className="tiny">Modeled US AQI</span></div></div>
+        <section className="panel briefing-panel"><div className="panel-heading"><div><p className="section-label">YOUR OUTDOOR PLAN</p><h2>A clearer time to go</h2></div><span className="brief-icon" aria-hidden>☀</span></div>
+          <div className="weather-strip"><div><span className="big-number">{current?.temperature_2m !== undefined ? Math.round(current.temperature_2m) + "°" : "—"}</span><span className="tiny">{forecast?.location.name ?? "Houston"} · {demo ? "illustrative preview" : "model forecast"}</span></div><div><strong>{current?.apparent_temperature !== undefined ? Math.round(current.apparent_temperature) + "°F" : "—"}</strong><span className="tiny">Feels like</span></div><div><strong>{current?.us_aqi !== undefined ? Math.round(current.us_aqi) : "—"}</strong><span className="tiny">{demo ? "Demo US AQI" : "Modeled US AQI"}</span></div></div>
           {!view && <p className="muted">Gathering environmental context…</p>}
           <div className="recommendations">{view?.recommendations.map((card) => <article className="recommendation" key={card.id}>
             <div className="recommendation-heading"><strong>{card.title}</strong><span className="tag">{card.demo ? "DEMO" : card.status}</span></div>
-            <p className="tiny">{card.location} · {localTime(card.time, view.timezone)}</p><p>{card.reason}</p>
-            {card.alternative_time && <p className="alternative">Consider {localTime(card.alternative_time, view.timezone)} instead. Check conditions again before heading out.</p>}
+            <p className="tiny">{card.location} · {localDateTime(card.time, view.timezone)}</p><p>{card.reason}</p>
+            {card.category === "outdoor" && <ActivityComparison card={card} timezone={view.timezone} />}
             <div className="action-links">{card.suggestions.map((suggestion) => <a key={suggestion.title} href={suggestion.source_url} target="_blank" rel="noreferrer">{suggestion.title} ↗</a>)}</div>
           </article>)}</div>
           <button className="secondary listen-button" disabled={!voice || audioBusy || !view} onClick={() => void play((demo ? "Demonstration briefing. " : "") + (view?.recommendations.map((r) => r.title + ". " + r.reason).join(" ") ?? ""))}>{audioBusy ? "Preparing audio…" : "◖ Listen to my briefing"}</button>
           <p className="tiny">{view ? "Updated " + localTime(view.generated_at, view.timezone) : "Waiting for data"} · <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Open-Meteo</a> / <a href="https://atmosphere.copernicus.eu/" target="_blank" rel="noreferrer">CAMS</a></p>
         </section>
       </div>
-      <PreferencesEditor value={prefs} onSave={save} />
-      <section id="alerts" className="panel alerts-panel"><div className="panel-heading"><div><p className="section-label">A HEADS-UP, WHEN IT MATTERS</p><h2>You don’t have to keep checking.</h2></div><span className="tag">{stream}</span></div>
-        <div className="notification-controls"><button className="secondary" onClick={() => void enableNotifications()}>{notifications}</button><label className="voice-toggle"><input type="checkbox" checked={voice} onChange={(event) => { setVoice(event.target.checked); voiceRef.current = event.target.checked; if (!event.target.checked) audioRef.current?.pause(); }} />Enable voice briefings</label><button className="quiet" onClick={() => void sendDemo()}>Try demo alert ↗</button></div>
-        <p className="tiny">Notifications work while this dashboard is running. Routine checks use your saved time and thresholds; these are not official emergency alerts.</p>
+      <section id="monitor" className="monitor-section"><div className="section-heading"><div><p className="section-label">03 / WATCHING FOR CHANGE</p><h2>Live environmental monitor</h2></div><span className="tag"><span className="live-dot" /> {monitorStatus}</span></div>
+        <div className="monitor-grid"><div className="panel monitor-map"><HazardMap readings={view?.hazards ?? []} locations={prefs.locations} anomalies={anomalies} airStations={airStations} /><Sparkline points={history} /><p className="tiny">{view?.coverage}</p></div>
+          <div className="panel event-panel"><div className="panel-heading"><div><p className="section-label">STATION SIGNALS</p><h3>Unusual readings</h3></div><span className="tag">{anomalies.length} recorded</span></div>
+            <p className="muted">New station readings are compared with that station’s recent history. An anomaly needs review; it does not confirm an emergency.</p>
+            <div className="event-list" aria-live="polite">{anomalies.length ? anomalies.slice(0, 5).map((event) => <article className="event-card" key={event.id}><div className="event-top"><span className="tag">{event.is_simulated ? "DEMO" : event.severity} · {event.hazard === "flood" ? "WATER" : "AIR"}</span><span className="tiny">{localTime(event.observed_at)}</span></div><strong>{event.station_name}</strong><p>{event.hazard === "flood" ? "Gage height" : "PM2.5"} {event.value.toFixed(1)} {event.unit} <span>vs {event.baseline.toFixed(1)} {event.hazard === "flood" ? "about an hour earlier" : "recent average"}</span></p><span className="tiny">{event.source} · {event.sample_count} prior samples · {event.status}{event.hazard === "flood" ? ` · ${event.score.toFixed(2)} ft/hour rise` : ""}</span></article>) : <p className="empty-events">No unusual station readings recorded yet.</p>}</div>
+            <div className="demo-actions"><button className="secondary demo-button" disabled={demoBusy} onClick={() => void sendDemo("air")}>{demoBusy ? "Running simulation…" : "Run labeled PM2.5 demo ↗"}</button><button className="secondary demo-button" disabled={demoBusy} onClick={() => void sendDemo("flood")}>Run labeled bayou-rise demo ↗</button></div><p className="tiny">Synthetic samples run through the detectors and stay out of real sensor history. Simulation requires database setup and demo access.</p>
+          </div></div>
+      </section>
+      <div className="settings-anchor" id="settings"><PreferencesEditor value={prefs} onSave={save} /></div>
+      <section id="alerts" className="panel alerts-panel"><div className="panel-heading"><div><p className="section-label">04 / PERSONAL HEADS-UP</p><h2>Alerts for your places and plans</h2></div><span className="tag">{unreadCount} unread · {stream}</span></div>
+        <div className="notification-controls"><button className="secondary" onClick={() => void enableNotifications()}>{notifications}</button><label className="voice-toggle"><input type="checkbox" checked={voice} onChange={(event) => { setVoice(event.target.checked); voiceRef.current = event.target.checked; if (!event.target.checked) audioRef.current?.pause(); }} />Enable voice briefings</label></div>
+        <p className="tiny">Notifications work while this dashboard is running. Routine checks use your saved forecast thresholds; station alerts describe observed changes. These are not official emergency alerts.</p>
         {audioError && <p className="notice" role="status">{audioError}</p>}
         {!alerts.length && <div className="empty-alert"><span aria-hidden>◎</span><div><strong>We’ll let you know when conditions change.</strong><p className="muted">Save a routine to personalize your alerts, or try a clearly labeled demonstration.</p></div></div>}
-        <div className="alert-list" aria-live="polite">{alerts.map((alert) => <article className="alert-card" key={alert.id}><span className="tag">{alert.demo ? "DEMO" : alert.severity} · {alert.hazard}</span><p>{alert.message}</p><span className="tiny">{localTime(alert.time)}</span><div className="action-links">{alert.suggestions.map((s) => <a href={s.source_url} key={s.title} target="_blank" rel="noreferrer">{s.title} ↗</a>)}</div></article>)}</div>
-      </section>
-      <section id="evidence"><div className="section-heading"><div><p className="section-label">THE CONTEXT BEHIND THE ADVICE</p><h2>Houston, at a glance.</h2></div><span className="tiny">Observations and forecasts are labeled separately</span></div>
-        <div className="module-grid">
-          <ModuleCard title="Bayou conditions" value={gauge ? gauge.value.toFixed(2) + " ft" : "Awaiting gauges"} status={gaugeStale ? "stale observation" : view?.source_status.flood ?? "connecting"} caption={gauge ? gauge.station_name + " · " + localTime(gauge.time) + " · app " + gauge.severity : "USGS instantaneous observations"} />
-          <ModuleCard title="Air quality" value={current?.us_aqi !== undefined ? Math.round(current.us_aqi) + " US AQI" : "Unavailable"} status={view?.source_status.air ?? "connecting"} caption="Modeled forecast · CAMS / Open-Meteo" accent="orange" />
-          <ModuleCard title="Power grid" value="Integration deferred" status="Demo module" caption="No live ERCOT conditions connected. Follow current official conservation guidance." accent="neutral" />
-        </div>
-        <details className="panel evidence-details"><summary>Explore map & hourly history <span>+</span></summary>
-          <HazardMap readings={view?.hazards ?? []} locations={prefs.locations} /><Sparkline points={history} />
-          <p className="tiny">{view?.coverage}</p>
-        </details>
+        <div className="alert-list" aria-live="polite">{alerts.map((alert) => <article className={`alert-card ${alert.read_at ? "is-read" : "is-unread"}`} key={alert.id}><div className="alert-meta"><span className="tag">{alert.demo ? "DEMO" : alert.severity} · {alert.hazard}</span><span className="tiny">{alert.read_at ? "Read" : "Unread"}</span></div><p>{alert.message}</p><span className="tiny">{localTime(alert.time)}</span><div className="action-links">{alert.suggestions.map((s) => <a href={s.source_url} key={s.title} target="_blank" rel="noreferrer">{s.title} ↗</a>)}</div><button className="quiet alert-read-toggle" disabled={readingId === alert.id} onClick={() => void toggleAlertRead(alert)}>{readingId === alert.id ? "Saving…" : alert.read_at ? "Mark unread" : "Mark as read"}</button></article>)}</div>
       </section>
       <details className="panel operations"><summary><span><span className="live-dot" /> Always working between questions</span><span className="tiny">{operations?.hosting ?? "Checking deployment"} · View system status +</span></summary>
         <p className="muted">The cloud workers collect environmental data every 15 minutes and evaluate routines every minute.</p>
@@ -177,6 +250,6 @@ export default function Home() {
         <p className="tiny">Configured does not mean verified: {operations && Object.entries(operations.integrations).map(([key, value]) => key + ": " + value).join(" · ")}</p>
       </details>
     </main>
-    <footer><a className="wordmark" href="/">noach<span className="orange-dot" />select</a><p>Local awareness. Everyday resilience.</p><span className="tiny">Built for Houston · CodeRED: Orion 2026</span></footer>
+    <footer><a className="wordmark" href="/"><span className="brand-icon">✳</span> Noach Select</a><p>Local awareness. Everyday resilience.</p><span className="tiny">Built for Houston · CodeRED: Orion 2026</span></footer>
   </div>;
 }

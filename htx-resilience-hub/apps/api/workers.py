@@ -6,12 +6,14 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from .db import connection
-from .environment import UH, forecast, fresh, hazards, distance
+from .environment import UH, forecast, fresh
 from .models import UserPrefs
 from .recommendations import next_activity, hour_for, risks, suggestions
 from .store import job_update, persist_alert, get_prefs
 from .providers import gemini_answer
 from .ingest.flood import main as flood_main
+from .ingest.air import poll_air
+from .flood_anomalies import detect_flood_anomalies
 
 def alert_candidates(prefs: UserPrefs, snapshots: list[dict[str,Any]], now: datetime) -> list[tuple[str,dict[str,Any]]]:
     results: list[tuple[str,dict[str,Any]]] = []
@@ -63,31 +65,9 @@ async def evaluate_alerts() -> None:
         await persist_alert("demo:"+request["id"],payload)
         async with connection() as conn:
             await conn.execute("UPDATE demo_requests SET processed_at=now() WHERE id=%s",(request["id"],))
-    flood,mode = await hazards()
     for prefs in await profiles():
         snapshots = await asyncio.gather(*(forecast(loc) for loc in prefs.locations))
         candidates = alert_candidates(prefs,snapshots,now)
-        transitions: dict[str,tuple[str,str]] = {}
-        if mode == "live":
-            gauges = [r for r in flood if "gage height" in r["metric"].lower() and r["unit"]=="ft" and fresh(r["time"],now)]
-            for location in prefs.locations:
-                if not gauges:
-                    continue
-                gauge = min(gauges,key=lambda r:distance(location,r))
-                severity = gauge["severity"]
-                # Persist transitions; recovery updates baseline without an alarming notification.
-                state_key = f"flood-state:{prefs.user_id}:{location.id}:{gauge['station_id']}"
-                async with connection() as conn:
-                    previous = await (await conn.execute("SELECT severity FROM flood_alert_state WHERE key=%s",(state_key,))).fetchone()
-                    old = previous["severity"] if previous else "normal"
-                    if severity == "normal":
-                        await conn.execute("INSERT INTO flood_alert_state VALUES (%s,%s) ON CONFLICT(key) DO UPDATE SET severity=EXCLUDED.severity",(state_key,severity))
-                if severity != old and severity in {"watch","warning"}:
-                    key = f"{state_key}:{gauge['time']}:{severity}"
-                    transitions[key] = (state_key,severity)
-                    candidates.append((key,{"id":"0","time":now.isoformat(),"user_id":prefs.user_id,"hazard":"flood","severity":severity,
-                        "message":f"App threshold {severity} at {gauge['station_name']}: {gauge['value']} ft. This does not establish road safety.",
-                        "channel":"dashboard","location_id":location.id,"station_id":gauge["station_id"],"suggestions":suggestions("flood"),"demo":False}))
         for key,payload in candidates:
             # Check existing delivery before generation; the insert still enforces concurrent deduplication.
             async with connection() as conn:
@@ -100,9 +80,6 @@ async def evaluate_alerts() -> None:
                 if provider == "gemini":
                     payload["message"] = answer
             await persist_alert(key,payload)
-            if key in transitions:
-                async with connection() as conn:
-                    await conn.execute("INSERT INTO flood_alert_state VALUES (%s,%s) ON CONFLICT(key) DO UPDATE SET severity=EXCLUDED.severity",transitions[key])
     await job_update("alert_evaluator","ok")
 
 async def run_job(name: str, callback: Any) -> None:
@@ -120,6 +97,16 @@ async def ingest_flood() -> None:
     code = await asyncio.to_thread(flood_main)
     if code:
         raise RuntimeError("Flood ingestion failed")
+    published = await detect_flood_anomalies()
+    if published:
+        print(json.dumps({"job":"flood_anomaly_detection","events":published,
+                          "time":datetime.now(timezone.utc).isoformat()}),flush=True)
+
+async def ingest_air() -> None:
+    if not os.getenv("AIRNOW_API_KEY", "").strip():
+        await job_update("air_ingestion", "not configured")
+        return
+    await job_update("air_ingestion", "ok", await poll_air())
 
 async def periodic(name: str, callback: Any, seconds: int) -> None:
     loop = asyncio.get_running_loop()
@@ -133,6 +120,7 @@ async def main() -> None:
     require_env("DATABASE_URL")
     await asyncio.gather(
         periodic("flood_ingestion",ingest_flood,900),
+        periodic("air_ingestion",ingest_air,3600),
         periodic("forecast_ingestion",ingest_forecasts,900),
         periodic("alert_evaluator",evaluate_alerts,60))
 

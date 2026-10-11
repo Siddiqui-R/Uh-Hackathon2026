@@ -6,30 +6,34 @@ import signal
 import subprocess
 import sys
 import time
+from dotenv import load_dotenv
 
 def main() -> None:
     root=Path(__file__).resolve().parents[1]
+    load_dotenv(root/".env")
     node=shutil.which("node")
     if not node:
         raise RuntimeError("Node.js is required")
+    web_port=os.getenv("HTX_WEB_PORT","3000")
     commands=[
-        ([sys.executable,"-m","apps.api.run"],root),
-        ([sys.executable,"-m","apps.api.workers"],root),
-        ([node,str(root/"node_modules/next/dist/bin/next"),"dev","--port","3000"],root/"apps/web")]
+        ("api",[sys.executable,"-m","apps.api.run"],root),
+        ("workers",[sys.executable,"-m","apps.api.workers"],root),
+        ("web",[node,str(root/"node_modules/next/dist/bin/next"),"dev","--port",web_port],root/"apps/web")]
     processes=[]
     try:
-        for command,cwd in commands:
-            processes.append(subprocess.Popen(command,cwd=cwd,creationflags=subprocess.CREATE_NO_WINDOW if os.name=="nt" else 0))
-        print("noach.select: http://localhost:3000 (API: 8000; supervised local workers)",flush=True)
-        while all(process.poll() is None for process in processes):
+        for name,command,cwd in commands:
+            processes.append((name,subprocess.Popen(command,cwd=cwd)))
+        print(f"Noach Select: http://localhost:{web_port} (API: 8000; supervised local workers)",flush=True)
+        while all(process.poll() is None for _,process in processes):
             time.sleep(1)
-        raise RuntimeError("A service exited; inspect its output")
+        failed=[f"{name} (exit {process.returncode})" for name,process in processes if process.poll() is not None]
+        raise RuntimeError("Service exited: "+", ".join(failed))
     except KeyboardInterrupt:
         pass
     finally:
-        for process in processes:
+        for _,process in processes:
             process.terminate()
-        for process in processes:
+        for _,process in processes:
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:

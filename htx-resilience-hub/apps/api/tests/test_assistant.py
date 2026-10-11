@@ -4,11 +4,12 @@ import os
 import unittest
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from apps.api.models import UserPrefs, Location, Routine
-from apps.api.environment import severity, fresh, forecast, CACHE, location_key
+from apps.api.environment import public_hazards, fresh, forecast, CACHE, location_key
 from apps.api.recommendations import hour_for, next_activity, build_recommendations
 from apps.api.workers import alert_candidates
 from apps.api.ingest.flood import parse_readings, write_readings, INSERT_SQL
@@ -30,8 +31,12 @@ def snapshot() -> dict:
     ],"source_status":{"weather":"live model","air":"live model"}}
 
 class EnvironmentalTests(unittest.TestCase):
-    def test_severity_boundaries(self) -> None:
-        self.assertEqual([severity(v) for v in [9,10,10.01,15,15.01]],["normal","normal","watch","watch","warning"])
+    def test_gage_heights_have_no_shared_flood_stage_threshold(self) -> None:
+        rows = [{"station_id":"low","time":NOW,"value":7.0},
+                {"station_id":"high","time":NOW,"value":16.81}]
+        result = public_hazards(rows)
+        self.assertEqual([row["severity"] for row in result], ["unrated", "unrated"])
+        self.assertEqual(result[0]["time"], NOW.isoformat())
 
     def test_timezones_and_weekdays(self) -> None:
         self.assertEqual(next_activity(prefs().routines[0],prefs(),NOW),datetime(2026,10,10,22,tzinfo=UTC))
@@ -53,6 +58,39 @@ class EnvironmentalTests(unittest.TestCase):
         cards=build_recommendations(prefs(),[data],[],NOW)
         self.assertEqual(cards[0]["status"],"consider alternatives")
         self.assertEqual(cards[0]["alternative_time"],data["hours"][1]["time"])
+        self.assertEqual(cards[0]["original_conditions"]["feels_like_f"],99)
+        self.assertEqual(cards[0]["original_conditions"]["us_aqi"],110)
+        self.assertEqual(cards[0]["alternative_conditions"]["feels_like_f"],85)
+        self.assertEqual(cards[0]["alternative_conditions"]["us_aqi"],40)
+
+    def test_heat_comparison_when_air_forecast_is_missing(self) -> None:
+        data=snapshot()
+        for hour in data["hours"]:
+            hour.pop("us_aqi")
+        cards=build_recommendations(prefs(),[data],[],NOW)
+        self.assertEqual(cards[0]["status"],"consider alternatives")
+        self.assertIsNone(cards[0]["original_conditions"]["us_aqi"])
+        self.assertIsNone(cards[0]["alternative_conditions"]["us_aqi"])
+        self.assertNotIn("US AQI",cards[0]["reason"])
+
+    def test_no_unsupported_comparison_without_matching_evidence(self) -> None:
+        data=snapshot()
+        data["hours"][1].pop("us_aqi")
+        cards=build_recommendations(prefs(),[data],[],NOW)
+        self.assertIsNone(cards[0]["alternative_time"])
+        self.assertIsNone(cards[0]["alternative_conditions"])
+
+    def test_alternative_skips_overnight_hour(self) -> None:
+        evening=prefs()
+        evening.routines[0].local_time="19:00"
+        evening_now=datetime(2026,10,10,23,30,tzinfo=UTC)
+        data={"location":LOCATION.model_dump(),"retrieved_at":evening_now.isoformat(),"hours":[
+            {"time":datetime(2026,10,11,0,tzinfo=UTC).isoformat(),"apparent_temperature":99,"us_aqi":110},
+            {"time":datetime(2026,10,11,9,tzinfo=UTC).isoformat(),"apparent_temperature":80,"us_aqi":40},
+            {"time":datetime(2026,10,11,12,tzinfo=UTC).isoformat(),"apparent_temperature":83,"us_aqi":42},
+        ]}
+        cards=build_recommendations(evening,[data],[],evening_now)
+        self.assertEqual(cards[0]["alternative_time"],data["hours"][2]["time"])
 
     def test_stale_missing_and_alert_window(self) -> None:
         self.assertTrue(fresh(NOW,NOW))
@@ -103,6 +141,33 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(provider,"fallback")
             self.assertIn("rule-based",answer)
 
+    async def test_gemini_receives_structured_context_and_closes_client(self) -> None:
+        import json
+
+        class FakeAsyncClient:
+            def __init__(self):
+                self.models = SimpleNamespace(generate_content=AsyncMock(
+                    return_value=SimpleNamespace(text="Use the cooler forecast hour.")))
+                self.closed = False
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                self.closed = True
+
+        async_client = FakeAsyncClient()
+        with patch.dict(os.environ,{"GEMINI_API_KEY":"test-only","GEMINI_MODEL":"gemini-flash-latest"}), \
+             patch("google.genai.Client",return_value=SimpleNamespace(aio=async_client)):
+            answer,provider=await gemini_answer("Basketball near UH?",{"source_status":{"air":"live model"}},"Saved UH")
+        self.assertEqual(provider,"gemini")
+        self.assertEqual(answer,"Use the cooler forecast hour.")
+        self.assertTrue(async_client.closed)
+        request=json.loads(async_client.models.generate_content.await_args.kwargs["contents"])
+        self.assertEqual(request["question"],"Basketball near UH?")
+        self.assertEqual(request["context"]["source_status"]["air"],"live model")
+        self.assertEqual(request["saved_memory"],"Saved UH")
+
     async def test_demo_profiles_not_shared(self) -> None:
         DEMO_PREFS["alice"]=prefs("alice")
         with patch.dict(os.environ,{"NOACH_DEMO_MODE":"true"}), patch("apps.api.store.connection",side_effect=RuntimeError("offline")):
@@ -120,7 +185,7 @@ class RouteTests(unittest.TestCase):
 
     def test_hazard_contract_and_ask(self) -> None:
         row={"hazard":"flood","station_id":"08074500","station_name":"Whiteoak","lat":29.7752,"lon":-95.3972,
-             "metric":"Gage height, feet","value":7.71,"unit":"ft","severity":"normal","time":NOW.isoformat()}
+             "metric":"Gage height, feet","value":7.71,"unit":"ft","severity":"unrated","time":NOW.isoformat()}
         with patch.dict(os.environ,{"INTERNAL_API_TOKEN":"","DATABASE_URL":"mock"}), patch("apps.api.main.hazards",new=AsyncMock(return_value=([row],"live"))), patch("apps.api.main.briefing",new=AsyncMock(return_value={})), patch("apps.api.main.get_prefs",new=AsyncMock(return_value=(prefs(),"database"))), patch("apps.api.main.memory_get",new=AsyncMock(return_value="")), patch("apps.api.main.gemini_answer",new=AsyncMock(return_value=("Grounded answer","gemini"))):
             with TestClient(app) as client:
                 response=client.get("/api/hazards")
