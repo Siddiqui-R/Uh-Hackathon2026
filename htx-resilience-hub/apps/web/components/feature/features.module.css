@@ -31,3 +31,42 @@
 .planList{display:grid;margin-top:18px;border-top:1px solid #cfded2}.activityItem{padding:18px 0;border-bottom:1px solid #d9e3da}.activityItem h3{font-size:18px!important}.activityItem .placeLine{font-size:13px;color:#486d5f;margin:7px 0}.activityItem .scheduleLine{font-size:12px;color:#61766b;margin-bottom:7px}.activityActions{align-items:center;gap:12px;flex-wrap:wrap}.activityActions a{font-size:12px}.planningNext{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;border-top:1px solid #d9e3da;padding-top:16px;margin-top:20px;font-size:12px}.inlineDetails{font-size:12px;margin:8px 0 12px}.inlineDetails summary{cursor:pointer;color:#326a4a;padding:5px 0}.plannerEditor{max-width:none;margin:0}.plannerQuestions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 24px}.plannerQuestion{grid-template-columns:27px minmax(0,1fr);gap:10px;padding:18px 0}.plannerQuestion h3{font-size:15px!important}.plannerQuestion p{font-size:12px;margin-bottom:10px}.stepNumber{width:25px;height:25px;font:11px monospace}.plannerTwoColumns{grid-template-columns:repeat(2,minmax(0,1fr))}.plannerReview strong{font-size:14px}.plannerReview{border-radius:6px;background:#f3f6ef}.plannerQuestion .field{font-size:12px}.choice{font-size:12px;padding:8px 10px}.plannerEmpty{padding:20px;border-radius:6px}.plannerEmpty p{font-size:13px}.outlookSection{min-width:0}.outlookSection h2{font-size:18px;letter-spacing:-.3px;margin:0 0 7px}.outlookList{display:grid;gap:14px;margin-top:18px}.sourceIndex{border-top:1px solid #cfded2;padding:14px 0}.sourceIndex>summary{display:flex;justify-content:space-between;gap:14px;list-style:revert;font-size:13px;font-weight:700;color:#365f50;cursor:pointer}.sourceIndex>summary span{font-size:11px;font-weight:400;color:#61766b}.sourceIndex[open]>summary{margin-bottom:14px}
 @media(max-width:760px){.plannerQuestions{grid-template-columns:1fr}.plannerTwoColumns{grid-template-columns:repeat(2,minmax(0,1fr))}.sourceIndex>summary{flex-wrap:wrap}.activityActions{margin:5px 0 0}.activityItem{gap:8px}}
 @media(max-width:600px){.plannerTwoColumns{grid-template-columns:1fr}}
+
+/* Experience layer: shared motion, touch targets and loading states for feature pages. */
+.panel{border-radius:16px;box-shadow:0 10px 28px #314f3b0d}
+.button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:42px;border-radius:9px;font-weight:700;text-decoration:none;transition:background-color .16s cubic-bezier(.2,.7,.2,1),border-color .16s cubic-bezier(.2,.7,.2,1),box-shadow .16s cubic-bezier(.2,.7,.2,1),transform .16s cubic-bezier(.2,.7,.2,1)}
+.button:hover:not(:disabled){background:#dfeadc;border-color:#8caf98}.button:active:not(:disabled){transform:scale(.97)}
+.plannerEditor .button:hover:not(:disabled){background:#285c45;border-color:#285c45;box-shadow:0 6px 14px #285c4533}
+.quiet{border-radius:7px;min-height:40px;text-underline-offset:3px;transition:background-color .16s cubic-bezier(.2,.7,.2,1),color .16s}.quiet:hover:not(:disabled){background:#eef3eb;color:#285c45}
+.inlineLink{text-underline-offset:3px;transition:color .16s}.inlineLink:hover{color:#285c45}
+.loading{border-radius:14px;border:1px solid #d9e3da;background:linear-gradient(90deg,#e9eee6 30%,#f4f6f1 50%,#e9eee6 70%);background-size:300% 100%;animation:noach-shimmer 1.8s cubic-bezier(.2,.7,.2,1) infinite}
+.skeletonList{display:grid;gap:12px}
+.skeletonCard{display:grid;gap:4px;padding:18px 20px;border:1px solid #d9e3da;border-radius:14px;background:#fffefa}
+.skeletonCard :global(.skeleton-value){margin:6px 0 4px;width:40%}
+.notice,.error{line-height:1.55;animation:noach-rise .28s cubic-bezier(.16,1,.3,1) both}
+.planList>*{animation:noach-rise .5s cubic-bezier(.16,1,.3,1) both}
+.planList>:nth-child(2){animation-delay:50ms}.planList>:nth-child(3){animation-delay:100ms}.planList>:nth-child(n+4){animation-delay:140ms}
+.activityItem{padding:18px 14px;margin:0 -14px;border-radius:12px;transition:background-color .2s cubic-bezier(.2,.7,.2,1)}
+.activityItem:hover{background:#f6f9f4}
+.activityItem .placeLine{margin:9px 0 7px}
+.alertState{display:inline-flex;align-items:center;gap:6px}
+.alertState::before{content:"";width:7px;height:7px;border-radius:50%;background:#b9c7bd}
+.alertOn::before{background:#6b9b80}
+.outlookLink{display:inline-flex;align-items:center;min-height:36px;padding:6px 12px;border-radius:999px;border:1px solid #b8d0bc;background:#f2f6f0;color:#285c45;font-weight:700;text-decoration:none;transition:background-color .16s,border-color .16s,transform .16s}
+.outlookLink:hover{background:#e3ede0;border-color:#8caf98}.outlookLink:active{transform:scale(.97)}
+.plannerEditor{animation:noach-rise .45s cubic-bezier(.16,1,.3,1) both;scroll-margin-top:96px;border-color:#b8d0bc}
+.plannerQuestion{transition:background-color .2s}
+.plannerQuestion:focus-within .stepNumber{background:#326a4a;color:#fff}
+.stepNumber{transition:background-color .2s,color .2s}
+.choice{min-height:40px;transition:background-color .16s,border-color .16s,color .16s,transform .16s}
+.choice:hover{border-color:#8caf98}.choice:active{transform:scale(.97)}
+.choice:focus-within{outline:3px solid #497c9a;outline-offset:2px}
+.plannerReview{border-left:4px solid #8caf98}
+.card,.event{animation:noach-rise .45s cubic-bezier(.16,1,.3,1) both}
+.card{transition:border-color .2s,box-shadow .2s}
+.sourceIndex>summary{min-height:36px;align-items:center;transition:color .16s}.sourceIndex>summary:hover{color:#285c45}
+.forecastDetails summary{transition:color .16s}.forecastDetails summary:hover{color:#285c45}
+@media(max-width:760px){.button,.quiet{min-height:44px}.choice{min-height:44px}.outlookLink{min-height:44px}.activityItem{margin:0 -8px;padding:16px 8px}.sourceIndex>summary{min-height:44px}}
+@media(prefers-reduced-motion:reduce){.loading{background:#e9eee6}.activityItem:hover{background:transparent}}
+@keyframes noach-rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}@keyframes noach-shimmer{from{background-position:120% 0}to{background-position:-120% 0}}
+.sourceIndex>summary>span{margin-left:auto}.sourceIndex>summary::after{content:"";flex:none;align-self:center;width:6px;height:6px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:translateY(-2px) rotate(45deg);transition:transform .28s cubic-bezier(.2,.7,.2,1)}.sourceIndex[open]>summary::after{transform:translateY(1px) rotate(-135deg)}

@@ -5,7 +5,7 @@ import { outlookQuality, outlookSummary, outlookStale, outlookFreshnessUnknown }
 function ConditionCard({ label, time, values, timezone, unvalidated }: {
   label: string; time: string; values: ActivityConditions; timezone: string; unvalidated?: boolean;
 }) {
-  return <section className={`comparison-card${unvalidated ? " comparison-unvalidated" : ""}`} aria-label={label}>
+  return <section className={`comparison-card${unvalidated ? " comparison-unvalidated" : ""}${label === "Alternative" ? " comparison-alternative" : ""}`} aria-label={label}>
     <div className="condition-heading"><h4>{label}</h4><span>{forecastTime(time, timezone)}</span></div>
     {unvalidated && <span className="metric-review">Unvalidated source values</span>}
     <dl className="outlook-metrics">

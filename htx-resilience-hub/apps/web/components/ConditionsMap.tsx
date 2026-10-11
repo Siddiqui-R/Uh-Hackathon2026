@@ -27,6 +27,7 @@ const SCALES: Record<ModelLayer, Scale> = {
 const SEVERITY_COLORS = { normal: "#527d70", watch: "#b78352", warning: "#ae6054", unrated: "#7d8e88" };
 const LIMITS = { south: 29.0, north: 30.7, west: -96.4, east: -94.4 };
 const inLimits = (lat: number, lon: number) => lat >= LIMITS.south && lat <= LIMITS.north && lon >= LIMITS.west && lon <= LIMITS.east;
+const reducedMotion = () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const band = (scale: Scale, value: number) => scale.bands.find((b) => value <= b.max) ?? scale.bands[scale.bands.length - 1];
 function mix(stops: [number, string][], value: number): string {
   const [first, last] = [stops[0], stops[stops.length - 1]];
@@ -62,7 +63,8 @@ export default function ConditionsMap({ readings, prefs, grid, gaugeMode }: { re
 
   useEffect(() => {
     if (!canvas.current) return;
-    const instance = L.map(canvas.current, { center: [29.76, -95.37], zoom: 10, scrollWheelZoom: false });
+    const still = reducedMotion();
+    const instance = L.map(canvas.current, { center: [29.76, -95.37], zoom: 10, scrollWheelZoom: false, zoomAnimation: !still, fadeAnimation: !still, markerZoomAnimation: !still });
     map.current = instance;
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' }).addTo(instance);
     instance.createPane("fills").style.zIndex = "350";
@@ -115,7 +117,7 @@ export default function ConditionsMap({ readings, prefs, grid, gaugeMode }: { re
       const value = validatedLayerValue(cell, fillLayer), { dlat, dlon } = area.cell;
       const evidence = items.map(({ key, value }) => `${modelLayers[key].label}: ${Math.round(value)} ${modelLayers[key].unit} · ${modelLayers[key].provider} model · valid ${forecastTime(cell.valid_at?.[modelLayers[key].source], prefs.timezone)}`);
       if (value !== undefined) L.rectangle([[cell.lat - dlat / 2, cell.lon - dlon / 2], [cell.lat + dlat / 2, cell.lon + dlon / 2]],
-        { pane: "fills", color: "#fffefa", weight: .5, opacity: .6, fillColor: colorFor(scale, value), fillOpacity: .4 })
+        { pane: "fills", className: "cell-fill", color: "#fffefa", weight: .5, opacity: .6, fillColor: colorFor(scale, value), fillOpacity: .4 })
         .bindTooltip(evidence.join("<br/>"), { sticky: true }).addTo(group);
       L.marker([cell.lat, cell.lon], { pane: "labels", interactive: false, keyboard: false,
         icon: L.divIcon({ className: "cell-layer-label", html: items.map(({ key, value }) => `<span aria-hidden="true">${key === "air" ? "AQI " : key === "heat" ? "Feels " : "Rain "}${Math.round(value)}${key === "heat" ? "°F" : key === "rain" ? "%" : ""}</span>`).join(""), iconSize: [70, items.length * 15], iconAnchor: [35, items.length * 7.5] }) }).addTo(group);
@@ -127,12 +129,12 @@ export default function ConditionsMap({ readings, prefs, grid, gaugeMode }: { re
     if (!group) return;
     group.clearLayers();
     if (gauges) readings.filter((r) => r.metric.toLowerCase().includes("gage height") && Number.isFinite(r.value)).forEach((reading) => {
-      L.circleMarker([reading.lat, reading.lon], { radius: 8, color: SEVERITY_COLORS[reading.severity], fillOpacity: .85, bubblingMouseEvents: false })
+      L.circleMarker([reading.lat, reading.lon], { radius: 8, className: "map-marker", color: SEVERITY_COLORS[reading.severity], fillOpacity: .85, bubblingMouseEvents: false })
         .bindPopup(popup(reading.station_name, [reading.value + " " + reading.unit, gaugeMode === "demo" || /demo/i.test(reading.station_name) ? "Simulated reading" : "USGS observation · stage unrated", "Observed " + forecastTime(reading.time, prefs.timezone), "A gauge does not establish road safety."]))
         .addTo(group);
     });
     if (places) prefs.locations.forEach((location: Location) => {
-      L.circleMarker([location.lat, location.lon], { radius: 7, color: "#26362e", weight: 2, fillColor: "#d76338", fillOpacity: 1, bubblingMouseEvents: false })
+      L.circleMarker([location.lat, location.lon], { radius: 7, className: "map-marker", color: "#26362e", weight: 2, fillColor: "#d76338", fillOpacity: 1, bubblingMouseEvents: false })
         .bindTooltip(location.name).on("click", () => setPin({ lat: location.lat, lon: location.lon, name: location.name })).addTo(group);
     });
   }, [readings, prefs.locations, prefs.timezone, gauges, places, gaugeMode]);
@@ -142,8 +144,14 @@ export default function ConditionsMap({ readings, prefs, grid, gaugeMode }: { re
     if (!group) return;
     group.clearLayers();
     if (!pin) return;
-    L.circleMarker([pin.lat, pin.lon], { pane: "pin", radius: 11, color: "#fffefa", weight: 3, fillColor: "#26362e", fillOpacity: 1, interactive: false }).addTo(group);
-    if (pin.focus) map.current?.flyTo([pin.lat, pin.lon], Math.max(map.current.getZoom(), 13), { duration: .8 });
+    // A single ripple marks where the pin landed; reduced motion hides it in CSS.
+    L.circleMarker([pin.lat, pin.lon], { pane: "pin", className: "map-pin-ring", radius: 11, color: "#26362e", weight: 2, fill: false, interactive: false }).addTo(group);
+    L.circleMarker([pin.lat, pin.lon], { pane: "pin", className: "map-pin", radius: 11, color: "#fffefa", weight: 3, fillColor: "#26362e", fillOpacity: 1, interactive: false }).addTo(group);
+    if (pin.focus && map.current) {
+      const zoom = Math.max(map.current.getZoom(), 13);
+      if (reducedMotion()) map.current.setView([pin.lat, pin.lon], zoom, { animate: false });
+      else map.current.flyTo([pin.lat, pin.lon], zoom, { duration: .8 });
+    }
   }, [pin]);
 
   useEffect(() => {
@@ -202,9 +210,9 @@ export default function ConditionsMap({ readings, prefs, grid, gaugeMode }: { re
       <div className="location-bar">
         <form className="location-search" onSubmit={(event) => void search(event)} role="search">
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Enter an address, ZIP code or place in Houston" aria-label="Search a location" maxLength={200} />
-          <button className="primary" disabled={searching}>{searching ? "Searching…" : "Get advice"}</button>
+          <button className="primary" disabled={searching} aria-busy={searching || undefined}>{searching ? "Searching…" : "Get advice"}</button>
         </form>
-        <button className="secondary" onClick={locate} disabled={locating}>{locating ? "Locating…" : "◎ Use my location"}</button>
+        <button className="secondary" onClick={locate} disabled={locating} aria-busy={locating || undefined}>{locating ? "Locating…" : "◎ Use my location"}</button>
         {matches && <ul className="place-matches" aria-label="Matching places">{matches.map((match) => <li key={match.address}><button onClick={() => choose(match)}><strong>{match.name}</strong><span className="tiny">{match.address}</span></button></li>)}</ul>}
       </div>
       {findError && <p className="notice" role="status">{findError}</p>}
@@ -216,7 +224,8 @@ export default function ConditionsMap({ readings, prefs, grid, gaugeMode }: { re
           <span className="grid-dot" style={{ background: status.severity ? SEVERITY_COLORS[status.severity] : "#aaa99b" }} />
           <span><strong>Power grid / {status.title}</strong><span className="tiny">{status.reserves_mw ? status.reserves_mw + " MW reserves · " : ""}ERCOT statewide · {forecastFreshness(status.updated)}</span></span>
         </a>}
-        {scale && area && <div className="map-overlay map-legend" aria-label="Map legend">
+        {!area && !areaError && <div className="map-overlay map-status" aria-hidden><span className="spinner" />Loading modeled layers…</div>}
+        {scale && area && <div className="map-overlay map-legend" aria-label="Map legend" key={fillLayer}>
           <strong>{scale.title} <span className="tiny">· {scale.unit}</span></strong>
           {scale.stops ? <>
             <i className="legend-ramp" style={{ background: `linear-gradient(90deg, ${scale.stops.map(([at, color]) => `${color} ${(at - scale.stops![0][0]) / (scale.stops![scale.stops!.length - 1][0] - scale.stops![0][0]) * 100}%`).join(", ")})` }} />
@@ -235,7 +244,7 @@ export default function ConditionsMap({ readings, prefs, grid, gaugeMode }: { re
         <p className="muted">Search Houston, tap the map, or choose a saved place.</p></div>}
       {(pin || pointError) && <div className="panel-heading"><div><p className="section-label">POINT OUTLOOK</p><h3>{pin?.name ?? "Outside coverage"}</h3>{pin && <p className="tiny">{pin.lat.toFixed(3)}, {pin.lon.toFixed(3)}</p>}</div><button className="quiet" onClick={clear}>Clear ✕</button></div>}
       {pointError && <p className="notice" role="status">{pointError}</p>}
-      {loading && !point && <p className="muted">Checking conditions here…</p>}
+      {loading && !point && <div role="status"><p className="loading-line"><span className="spinner" aria-hidden />Checking conditions here…</p><div className="spot-stats" aria-hidden>{[0, 1, 2, 3].map((key) => <div key={key}><span className="skeleton skeleton-value" /><span className="skeleton skeleton-line short" /></div>)}</div></div>}
       {point && pin && <div className={loading ? "refreshing" : ""}>
         <div className="spot-stats">
           <div><strong>{currentCell && now?.apparent_temperature != null && validatedLayerValue(currentCell,"heat") === undefined ? "Review data" : forecastNumber(now?.apparent_temperature, "°F")}</strong><span className="tiny">Modeled feels like</span></div>

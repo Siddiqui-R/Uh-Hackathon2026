@@ -51,13 +51,13 @@ export default function PublicConditions() {
     {error && <div className="notice" role="alert">{error} <button className="quiet" onClick={() => { setLoading(true); setAttempt((value) => value + 1); }}>Retry</button></div>}
     <div className="module-grid" aria-live="polite">
       <ModuleCard title="Feels like" value={loading ? "Loading…" : overview?.feelsLikeF != null ? `${Math.round(overview.feelsLikeF)}°F` : "Unavailable"}
-        status={loading ? "Loading" : overview?.feelsLikeF != null ? "Modeled" : "Unavailable"}
+        status={loading ? "Loading" : overview?.feelsLikeF != null ? "Modeled" : "Unavailable"} loading={loading}
         caption={loading ? "Checking the Houston forecast" : overview?.feelsLikeF != null ? `Open-Meteo modeled current conditions · UH area · retrieved ${retrieved}` : "Open-Meteo weather data unavailable"} />
       <ModuleCard title="Air quality" value={loading ? "Loading…" : overview?.usAqi != null ? `${Math.round(overview.usAqi)} US AQI` : "Unavailable"}
-        status={loading ? "Loading" : overview?.usAqi != null ? "Modeled" : "Unavailable"} accent="orange"
+        status={loading ? "Loading" : overview?.usAqi != null ? "Modeled" : "Unavailable"} accent="orange" loading={loading}
         caption={loading ? "Checking modeled air quality" : overview?.usAqi != null ? `CAMS / Open-Meteo modeled air quality · UH area · retrieved ${retrieved}` : "Modeled air-quality data unavailable"} />
       <ModuleCard title="Bayou gauge" value={loading ? "Loading…" : gauge ? `${gauge.valueFt.toFixed(2)} ft` : "Unavailable"}
-        status={loading ? "Loading" : !gauge ? "Unavailable" : simulated ? "Simulated" : stale ? "Stale" : "Observed"}
+        status={loading ? "Loading" : !gauge ? "Unavailable" : simulated ? "Simulated" : stale ? "Stale" : "Observed"} loading={loading}
         caption={loading ? "Checking nearby USGS observations" : gauge ? `${simulated ? "Simulated reading" : "USGS observation"} · ${gauge.station} · ${timestamp(gauge.observedAt)}${stale ? " · older than 1 hour" : ""}` : "No bayou gauge reading available"} />
     </div>
   </>;
