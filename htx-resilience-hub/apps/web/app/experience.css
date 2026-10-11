@@ -1,0 +1,227 @@
+/* Noach experience layer: shared tokens, purposeful motion, and touch-friendly states.
+   Loaded after globals.css. Colors stay within the existing daylight palette; a few text
+   shades are deepened from the same hues so small labels meet WCAG AA contrast. */
+:root{
+  --paper:#f5f6f2;--surface:#fffefa;--surface-tint:#eef3eb;--ink:#293d38;--line:#d8e2da;--line-strong:#c4d5c8;
+  --muted:#5d7069;--green:#527d70;--green-strong:#486d5f;--green-deep:#365f50;--green-wash:#e7efe4;
+  --orange:#ae735d;--orange-text:#9a6550;--review:#805d2f;--focus:#497c9a;
+  --radius-sm:8px;--radius:12px;--radius-lg:16px;
+  --shadow-sm:0 1px 2px #314f3b12;--shadow:0 10px 28px #314f3b0d;--shadow-lift:0 16px 34px #314f3b1c;
+  --ease:cubic-bezier(.2,.7,.2,1);--ease-out:cubic-bezier(.16,1,.3,1);
+  --dur-fast:.16s;--dur:.28s;--dur-slow:.5s;
+}
+html{scroll-behavior:auto}
+@media (prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
+body{font-family:var(--font-sans,"Segoe UI"),"Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+::selection{background:#d6e6d8;color:var(--ink)}
+h1,h2,h3{text-wrap:balance}p{text-wrap:pretty}
+.section-label{color:var(--green-strong)}
+h2{font-weight:650}h3{font-weight:650}
+.big-number,.module-value,.spot-stats strong,.outlook-metrics dd,.comparison-metrics dd,.comparison-time,.nav-count{font-variant-numeric:tabular-nums}
+[id]{scroll-margin-top:24px}
+@media (min-width:1101px){[id]{scroll-margin-top:96px}}
+
+/* Motion vocabulary. Every animation here is short, plays once, and is removed for reduced motion. */
+@keyframes noach-rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes noach-fade{from{opacity:0}to{opacity:1}}
+@keyframes noach-reveal{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+@keyframes noach-shimmer{from{background-position:120% 0}to{background-position:-120% 0}}
+@keyframes noach-spin{to{transform:rotate(360deg)}}
+@keyframes noach-pulse{0%{box-shadow:0 0 0 0 #6b9b8070}75%,100%{box-shadow:0 0 0 7px #6b9b8000}}
+@keyframes noach-target{0%{box-shadow:0 0 0 6px #9db8a4aa}100%{box-shadow:0 0 0 3px #dbe8dc}}
+@keyframes noach-dot{0%,80%,100%{opacity:.3}40%{opacity:1}}
+@keyframes noach-pin{from{opacity:0;transform:scale(.35)}to{opacity:1;transform:scale(1)}}
+@keyframes noach-ring{from{opacity:.55;transform:scale(1)}to{opacity:0;transform:scale(2.6)}}
+
+/* Gentle entrance: page sections rise in sequence, then lists stagger as their data arrives. */
+#main-content>*{animation:noach-rise var(--dur-slow) var(--ease-out) both}
+#main-content>*:nth-child(2){animation-delay:50ms}#main-content>*:nth-child(3){animation-delay:100ms}
+#main-content>*:nth-child(4){animation-delay:150ms}#main-content>*:nth-child(5){animation-delay:200ms}
+#main-content>*:nth-child(n+6){animation-delay:240ms}
+#main-content:focus{outline:none}
+.module-grid>*,.journey-steps>li,.alert-list>*,.event-list>*,.recommendations>*,.chat-message,.place-book .editor-row{animation:noach-rise var(--dur-slow) var(--ease-out) both}
+.module-grid>:nth-child(2),.journey-steps>li:nth-child(2),.alert-list>:nth-child(2),.recommendations>:nth-child(2){animation-delay:60ms}
+.module-grid>:nth-child(3),.journey-steps>li:nth-child(3),.alert-list>:nth-child(3),.recommendations>:nth-child(3){animation-delay:120ms}
+.alert-list>:nth-child(n+4),.recommendations>:nth-child(n+4){animation-delay:160ms}
+
+/* Controls: clear hover, pressed and busy states. */
+.primary,.secondary,.quiet,.prompt-chips button,.segmented button,.place-matches button{transition:background-color var(--dur-fast) var(--ease),border-color var(--dur-fast) var(--ease),color var(--dur-fast) var(--ease),box-shadow var(--dur-fast) var(--ease),transform var(--dur-fast) var(--ease)}
+.primary{border-radius:9px;box-shadow:0 1px 0 #ffffff26 inset,0 2px 6px #36594d26}
+.primary:hover:not(:disabled){background:var(--green-deep);box-shadow:0 1px 0 #ffffff26 inset,0 6px 14px #36594d33}
+.secondary{border-radius:9px}.secondary:hover:not(:disabled){border-color:#9fb8a2}
+.quiet{border-radius:7px}.quiet:hover:not(:disabled){background:#eef3eb}
+:is(.primary,.secondary,.quiet,.prompt-chips button):active:not(:disabled){transform:scale(.97)}
+a.primary,a.secondary{display:inline-flex;align-items:center;justify-content:center;gap:6px;text-decoration:none}
+button[aria-busy="true"]{position:relative;cursor:progress}
+button[aria-busy="true"]::before{content:"";display:inline-block;width:11px;height:11px;margin-right:8px;vertical-align:-1px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:noach-spin .8s linear infinite}
+.prompt-chips button:hover:not(:disabled){border-color:#9fb8a2;background:#f7faf4}
+.prompt-chips button span{transition:transform var(--dur-fast) var(--ease)}.prompt-chips button:hover:not(:disabled) span{transform:translate(2px,-2px)}
+.action-links a,.outlook-card-next a,.place-plan-links a,.planning-next a,.map-place-picker a{transition:color var(--dur-fast) var(--ease),border-color var(--dur-fast) var(--ease)}
+.action-links a:hover{color:var(--green-deep);border-color:var(--green-strong)}
+
+/* Forms and focus. */
+input,select,textarea{border-radius:9px;transition:border-color var(--dur-fast) var(--ease),box-shadow var(--dur-fast) var(--ease),background-color var(--dur-fast) var(--ease)}
+input:hover:not(:disabled):not([type=checkbox]):not([type=radio]),select:hover:not(:disabled){border-color:#a9c0ae}
+:where(input,select,textarea):focus-visible{outline:none;border-color:var(--focus);box-shadow:0 0 0 3px #497c9a40}
+:where(input[type=checkbox],input[type=radio]):focus-visible{outline:3px solid var(--focus);outline-offset:2px;box-shadow:none}
+input::placeholder{color:#74877f}
+:where(a,button,summary):focus-visible{outline:3px solid var(--focus);outline-offset:3px;border-radius:6px}
+
+/* Smooth disclosure panels with a turning chevron. */
+details[open]>:not(summary){animation:noach-reveal var(--dur) var(--ease-out) both}
+:is(.forecast-evidence,.outlook-disclosures details,.outlook-context,.layer-sources,.place-search,.evidence-details)>summary{justify-content:flex-start;gap:8px}
+:is(.forecast-evidence,.outlook-disclosures details,.outlook-context,.layer-sources,.place-search,.evidence-details)>summary::after{content:"";flex:none;width:6px;height:6px;margin-left:2px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:translateY(-2px) rotate(45deg);transition:transform var(--dur) var(--ease)}
+:is(.forecast-evidence,.outlook-disclosures details,.outlook-context,.layer-sources,.place-search,.evidence-details)[open]>summary::after{transform:translateY(1px) rotate(-135deg)}
+:is(.outlook-disclosures details,.outlook-context,.layer-sources,.place-search)>summary:hover{color:var(--green-deep)}
+.operations>summary{transition:color var(--dur-fast) var(--ease)}.operations>summary:hover{color:var(--green-deep)}
+
+/* Loading feedback: skeletons hold the layout, spinners mark work in progress. */
+.skeleton{display:block;border-radius:6px;background:linear-gradient(90deg,#e6ece3 30%,#f3f6f0 50%,#e6ece3 70%);background-size:300% 100%;animation:noach-shimmer 1.6s var(--ease) infinite}
+.skeleton-value{height:30px;width:60%;margin:19px 0 10px}.skeleton-line{height:10px;width:85%;margin-top:7px}.skeleton-line.short{width:50%}
+.spinner{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:noach-spin .8s linear infinite;vertical-align:-2px;flex:none}
+.loading-line{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:13px;padding:6px 0}
+.map-loading{display:grid;place-items:center;color:var(--muted);font-size:13px;border:1px solid var(--line);background:linear-gradient(90deg,#e9eee6 30%,#f4f6f1 50%,#e9eee6 70%);background-size:300% 100%;animation:noach-shimmer 1.8s var(--ease) infinite}
+.live-dot{animation:noach-pulse 2.4s var(--ease) 3}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+/* Panels and cards. */
+.panel{border-radius:var(--radius-lg);box-shadow:var(--shadow)}
+.notice{border-radius:10px;line-height:1.55;animation:noach-rise var(--dur) var(--ease-out) both}
+.demo-banner{border-radius:12px;line-height:1.55}
+.tag{display:inline-flex;align-items:center;gap:5px;line-height:1.3}
+.module-card{position:relative;overflow:hidden;display:flex;flex-direction:column;transition:box-shadow var(--dur) var(--ease)}
+.module-card::before{content:"";position:absolute;inset:0 0 auto;height:3px;background:var(--green);opacity:.75}
+.module-card.orange::before{background:#cba18c}.module-card.neutral::before{background:#a8b7ad}
+.module-card>.tiny{margin-top:auto;line-height:1.55}
+.module-value{font-weight:650;letter-spacing:-.8px}
+.module-card[aria-busy="true"] .tag{color:var(--muted)}
+.hero h1{max-width:14ch}
+.hero-actions a{min-height:44px}
+
+/* Places → Activities → Outlook journey on the overview. */
+.journey{display:grid;grid-template-columns:minmax(0,3fr) minmax(230px,1fr);gap:14px;margin:0 0 30px}
+.journey-steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.journey-steps>li{position:relative;display:flex;min-width:0}
+.journey-steps>li+li::before{content:"";position:absolute;left:-14px;top:37px;width:14px;height:2px;background:#b6cbbb}
+.journey-step,.journey-assistant{flex:1;display:flex;gap:14px;align-items:flex-start;padding:20px;border:1px solid var(--line);border-radius:var(--radius-lg);background:var(--surface);color:var(--ink);text-decoration:none;box-shadow:var(--shadow);min-width:0;transition:transform var(--dur) var(--ease),box-shadow var(--dur) var(--ease),border-color var(--dur) var(--ease)}
+.journey-step:hover,.journey-assistant:hover{transform:translateY(-2px);box-shadow:var(--shadow-lift);border-color:#b7cdbb}
+.journey-step:active,.journey-assistant:active{transform:translateY(0) scale(.99)}
+.journey-number{display:grid;place-items:center;width:34px;height:34px;flex:none;border-radius:50%;border:1px solid #c6d6c9;background:#f3f7f1;color:var(--green-strong);font:700 12px ui-monospace,SFMono-Regular,Consolas,monospace;transition:background-color var(--dur) var(--ease),color var(--dur) var(--ease)}
+.journey-step.is-done .journey-number{background:var(--green-strong);border-color:var(--green-strong);color:#fff}
+.journey-copy{display:grid;gap:5px;min-width:0}
+.journey-cue{font-size:10px;letter-spacing:1.3px;text-transform:uppercase;font-weight:700;color:var(--muted)}
+.journey-copy strong{font-size:19px;letter-spacing:-.3px;line-height:1.25}
+.journey-copy .journey-arrow{display:inline-block;color:var(--green);transition:transform var(--dur) var(--ease)}
+.journey-step:hover .journey-arrow,.journey-assistant:hover .journey-arrow{transform:translate(2px,-2px)}
+.journey-description{font-size:13px;line-height:1.5;color:var(--muted)}
+.journey-count{justify-self:start;margin-top:6px;font-size:11px;font-weight:700;color:var(--green-deep);background:var(--green-wash);border:1px solid #cfe0d1;border-radius:999px;padding:3px 9px}
+.journey-assistant{background:linear-gradient(145deg,#e8f1e9,#f2f4ed)}
+.journey-assistant .journey-number{background:var(--surface)}
+
+/* A shared place chip ties places, activities and outlook cards together. */
+.place-chip{display:inline-flex;align-items:center;gap:5px;max-width:100%;padding:3px 10px 3px 8px;border-radius:999px;background:#fbefe9;border:1px solid #edd5c9;color:#7a4c3b;font-size:12px;font-weight:600;line-height:1.4;overflow-wrap:anywhere}
+.place-chip::before{content:"";width:7px;height:7px;flex:none;border-radius:50%;background:#d76338;box-shadow:0 0 0 2px #26362e22}
+.activity-meta{align-items:center}
+.activity-meta>.place-chip:first-child{color:#7a4c3b}
+
+/* Places: each saved place is a calm card with its plans attached. */
+.place-book .editor-row{background:#fbfcf8;border:1px solid var(--line)!important;border-radius:var(--radius)!important;transition:border-color var(--dur) var(--ease),box-shadow var(--dur) var(--ease)}
+.place-book .editor-row:focus-within{border-color:#a9c0ae!important;box-shadow:0 0 0 3px #e3ede4}
+.place-book legend{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-weight:650;padding:0 6px;margin-left:-6px}
+.place-kind{font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--green-strong);background:var(--surface-tint);border:1px solid #d7e4d8;border-radius:999px;padding:2px 8px}
+.place-fields{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1.3fr) minmax(110px,.7fr) auto;gap:12px;align-items:end;width:100%}
+.place-fields .quiet{color:var(--orange-text);min-height:42px}
+.place-search-row{display:flex;gap:8px;align-items:stretch}.place-search-row input{flex:1;min-width:0}
+.place-search .place-matches{list-style:none;padding:4px;margin:8px 0 0;border:1px solid var(--line);border-radius:10px;max-height:180px;overflow-y:auto;background:var(--surface);box-shadow:none}
+.place-search .place-matches button{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;padding:9px 10px;border-radius:7px;background:none}
+.place-search .place-matches button:hover,.place-search .place-matches button:focus-visible{background:var(--surface-tint)}
+.place-search-note{margin-top:8px;color:var(--orange-text)!important}
+.place-search-meta{margin-top:8px}
+.place-plan-links{border-top-style:dashed}
+.place-plan-links .plan-count{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.place-plan-links .plan-count b{display:inline-grid;place-items:center;min-width:22px;height:22px;padding:0 6px;border-radius:999px;background:var(--green-wash);color:var(--green-deep);font-size:11px}
+.place-plan-links a{font-weight:700}
+.place-book form>.secondary{margin-right:10px}
+.place-book-actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:6px}
+.place-book-actions .primary{margin-top:0!important}
+.save-status{min-height:1.7em;margin-top:8px}
+
+/* Outlook cards. */
+.recommendation{transition:box-shadow var(--dur) var(--ease),border-color var(--dur) var(--ease);border-left-width:4px}
+.recommendation:target{border-color:#9db8a4;box-shadow:0 0 0 3px #dbe8dc;animation:noach-target 1.8s var(--ease) both}
+.recommendation .tag{font-weight:700}
+.comparison-card{transition:border-color var(--dur) var(--ease)}
+.comparison-alternative{background:#edf4eb;border:1px solid #b3cdb8}
+.comparison-alternative .condition-heading h4::before{content:"↻ ";color:var(--green)}
+.forecast-quality{border-radius:10px}
+
+/* Map: layer changes fade in place; pins land with a single ripple. */
+.map-canvas{border-radius:var(--radius);box-shadow:var(--shadow-sm)}
+.map-overlay{border-radius:10px;box-shadow:0 4px 16px #26362e1f;animation:noach-rise var(--dur) var(--ease-out) both}
+.map-status{left:50%;top:12px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:12px;color:var(--muted);white-space:nowrap;animation-name:noach-fade}
+.leaflet-pane path.cell-fill{animation:noach-fade .45s var(--ease) both}
+.leaflet-marker-icon.cell-layer-label{animation:noach-fade .4s var(--ease) .08s both}
+.leaflet-pane path.map-marker{animation:noach-fade .35s var(--ease) both}
+.leaflet-pane path.map-pin{transform-box:fill-box;transform-origin:center;animation:noach-pin .45s var(--ease-out) both}
+.leaflet-pane path.map-pin-ring{transform-box:fill-box;transform-origin:center;animation:noach-ring 1.1s var(--ease-out) both;pointer-events:none}
+.leaflet-tooltip,.leaflet-popup-content-wrapper{border-radius:10px;box-shadow:0 6px 18px #26362e26;font-family:inherit}
+.leaflet-popup-content p{margin:4px 0}
+.leaflet-control-zoom a{transition:background-color var(--dur-fast) var(--ease)}
+.layer-toggle{border-radius:10px;transition:background-color var(--dur) var(--ease),border-color var(--dur) var(--ease),box-shadow var(--dur) var(--ease)}
+.layer-toggle:hover:not(:has(input:disabled)){border-color:#9fb8a2}
+.layer-toggle.is-selected{box-shadow:inset 0 0 0 1px #9fb8a2}
+.layer-toggle small{transition:color var(--dur) var(--ease)}
+.map-advice{transition:box-shadow var(--dur) var(--ease)}
+.map-advice>*{animation:noach-fade var(--dur) var(--ease) both}
+.spot-stats>div{padding:10px 12px;border-radius:10px;background:#f6f8f3}
+.spot-stats .skeleton-value{height:22px;margin:2px 0 6px;width:70%}
+.refreshing{opacity:.6}
+.map-empty>span{display:grid;place-items:center;width:56px;height:56px;border-radius:50%;background:#fbefe9;font-size:28px}
+
+/* Alerts and assistant. */
+.alert-card{transition:background-color var(--dur) var(--ease),border-color var(--dur) var(--ease)}
+.alert-card.is-unread{border-left-width:4px}
+.thinking{display:inline-flex;align-items:center;gap:4px;margin-top:10px;color:var(--muted);font-size:12px}
+.thinking i{width:6px;height:6px;border-radius:50%;background:var(--green);animation:noach-dot 1.2s var(--ease) infinite}
+.thinking i:nth-child(2){animation-delay:.15s}.thinking i:nth-child(3){animation-delay:.3s}
+.chat-thread{scroll-behavior:smooth}
+.ask-form input{min-height:44px}
+
+/* Touch: comfortable targets and readable inputs on phones and tablets. */
+@media (pointer:coarse){
+  .primary,.secondary,.quiet,.prompt-chips button,.layer-tools select,.segmented button{min-height:44px}
+  summary{min-height:44px}
+  .layer-toggle{min-height:52px}
+  .place-matches button{min-height:44px}
+}
+@media (max-width:760px){
+  input:not([type=checkbox]):not([type=radio]),select,textarea{font-size:16px;min-height:44px}
+  .quiet,.secondary,.primary{min-height:44px}
+  :is(.outlook-disclosures details,.outlook-context,.layer-sources,.place-search,.forecast-evidence)>summary{min-height:44px}
+  .journey{grid-template-columns:1fr}
+  .journey-steps{grid-template-columns:1fr;gap:10px}
+  .journey-steps>li+li::before{left:36px;top:-10px;width:2px;height:10px}
+  .journey-step,.journey-assistant{padding:16px}
+  .place-fields{grid-template-columns:1fr}
+  .place-fields .quiet{justify-self:start;padding-left:0}
+  .place-search-row{flex-direction:column}
+  .spot-stats>div{padding:9px 10px}
+  .map-status{white-space:normal;max-width:calc(100% - 90px)}
+  .map-legend{left:8px;right:8px;bottom:22px;flex-direction:row;flex-wrap:wrap;gap:3px 10px;padding:8px 10px}
+  .map-legend>strong,.map-legend>.tiny{flex-basis:100%}
+  .map-legend .legend-ramp,.legend-ticks{width:100%}
+  .recommendation{border-left-width:3px}
+  .hero h1{max-width:none}
+}
+@media (min-width:761px) and (max-width:1100px){
+  .journey{grid-template-columns:1fr}
+  .place-fields{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+
+/* Reduced motion: keep every state change, drop the movement. */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-delay:0s!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
+  .skeleton,.map-loading{background:#e9eee6}
+  .leaflet-pane path.map-pin-ring{display:none}
+  .journey-step:hover,.journey-assistant:hover{transform:none}
+}

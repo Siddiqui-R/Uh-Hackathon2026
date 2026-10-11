@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Routine, UserPrefs } from "@/lib/types";
 import FeatureFrame from "./FeatureFrame";
 import styles from "./features.module.css";
@@ -76,6 +76,15 @@ export default function ActivityPlanner({ onboarding = false, continuePath = "/"
     finally { setLoading(false); }
   }
   useEffect(() => { void load(); }, []);
+  // When someone opens the editor, move them to it; auto-opened onboarding drafts keep the reading position.
+  const editorRef = useRef<HTMLElement>(null), focusEditor = useRef(false);
+  function openDraft(next: PlannedRoutine) { focusEditor.current = true; setDraft(next); setMessage(""); }
+  useEffect(() => {
+    if (!draft || !focusEditor.current || !editorRef.current) return;
+    focusEditor.current = false;
+    editorRef.current.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+    editorRef.current.querySelector<HTMLInputElement>("input")?.focus({ preventScroll: true });
+  }, [draft?.id]);
 
   function change(patch: Partial<PlannedRoutine>) {
     setDraft((current) => current ? { ...current, ...patch } : current);
@@ -154,7 +163,7 @@ export default function ActivityPlanner({ onboarding = false, continuePath = "/"
   return <FeatureFrame path="/routines" eyebrow="YOUR OUTDOOR PLANS" title="Activity planner"
     description="Choose a place and a schedule." planningPrefs={prefs}>
     <div className={styles.stack}>
-      {loading && <div className={styles.loading} role="status">Loading your activities…</div>}
+      {loading && <div className={styles.skeletonList} role="status"><p className="loading-line"><span className="spinner" aria-hidden />Loading your activities…</p>{[0, 1, 2].map((key) => <div className={styles.skeletonCard} key={key} aria-hidden><span className="skeleton skeleton-value" /><span className="skeleton skeleton-line short" /></div>)}</div>}
       {error && <div className={styles.error} role="alert">{error} {!prefs && !loading && <button className={styles.quiet} onClick={() => void load()}>Try again</button>}</div>}
       {!loading && prefs && <>
         {onboarding && !prefs.routines.length && <section className={styles.plannerWelcome}>
@@ -167,25 +176,25 @@ export default function ActivityPlanner({ onboarding = false, continuePath = "/"
           <div className={styles.between}><div><p className="section-label">ACTIVITY BOOK</p><h2>Your plans</h2>
             <p className={styles.muted}>{prefs.timezone} · {prefs.routines.length}/10 activities</p></div>
             {!draft && schemaReady && !!prefs.locations.length && prefs.routines.length < 10 &&
-              <button className={styles.button} onClick={() => { setDraft(newActivity(prefs, placeId)); setMessage(""); }}>+ Plan an activity</button>}
+              <button className={styles.button} onClick={() => openDraft(newActivity(prefs, placeId))}>+ Plan an activity</button>}
           </div>
           {!prefs.locations.length && <div className={styles.plannerEmpty}><h3>First, save a place</h3><p>Choose where you want to go so Noach can use the forecast for that area.</p>
             <a className={styles.button} href="/places?from=planner">Add a saved place ↗</a></div>}
           {!!prefs.locations.length && !prefs.routines.length && !draft && <div className={styles.plannerEmpty}><h3>No activities planned yet</h3>
             <p>Start with something you enjoy outdoors. You can change the details any time.</p>
-            {schemaReady && <button className={styles.button} onClick={() => setDraft(newActivity(prefs, placeId))}>Plan your first activity</button>}</div>}
+            {schemaReady && <button className={styles.button} onClick={() => openDraft(newActivity(prefs, placeId))}>Plan your first activity</button>}</div>}
           {!!prefs.routines.length && <div className={styles.planList}>{prefs.routines.map((item) => {
             const activity = item as PlannedRoutine;
             return <article className={styles.activityItem} key={item.id}><div><h3>{item.activity}</h3>
-              <p className={styles.placeLine}>⌖ {prefs.locations.find((place) => place.id === item.location_id)?.name ?? "Saved place unavailable"}</p><p className={styles.scheduleLine}>{activity.recurrence === "none" ? dateLabel(activity.start_date) : activity.weekdays.map((day) => days[day].slice(0, 3)).join(" · ")} / {timeLabel(activity.local_time)} / {activity.duration_minutes ?? 60} min</p><span className={styles.small}>{activity.alerts_enabled === false ? "Forecast alerts off" : "Forecast alerts on"}</span></div>
-              <div className={styles.activityActions}><a className={styles.inlineLink} href={`/recommendations#activity-${item.id}`}>Outlook ↗</a>{schemaReady && <button className={styles.quiet} disabled={saving || !!draft} onClick={() => { setDraft({ ...activity }); setMessage(""); }}>Edit</button>}
+              <p className={styles.placeLine}><span className="place-chip">{prefs.locations.find((place) => place.id === item.location_id)?.name ?? "Saved place unavailable"}</span></p><p className={styles.scheduleLine}>{activity.recurrence === "none" ? dateLabel(activity.start_date) : activity.weekdays.map((day) => days[day].slice(0, 3)).join(" · ")} / {timeLabel(activity.local_time)} / {activity.duration_minutes ?? 60} min</p><span className={`${styles.small} ${styles.alertState}${activity.alerts_enabled === false ? "" : ` ${styles.alertOn}`}`}>{activity.alerts_enabled === false ? "Forecast alerts off" : "Forecast alerts on"}</span></div>
+              <div className={styles.activityActions}><a className={styles.outlookLink} href={`/recommendations#activity-${item.id}`}>Outlook ↗</a>{schemaReady && <button className={styles.quiet} disabled={saving || !!draft} onClick={() => openDraft({ ...activity })}>Edit</button>}
                 {schemaReady && <button className={styles.quiet} disabled={saving || !!draft} onClick={() => void remove(activity)}>Remove</button>}</div></article>;
           })}</div>}
           {message && <div className={styles.notice} role="status">{message} <a className={styles.inlineLink} href="/recommendations">View outlook ↗</a></div>}
         <div className={styles.planningNext}><a className={styles.inlineLink} href="/places?from=planner">+ Add a place</a><a className={styles.inlineLink} href="/recommendations">Check outlook →</a></div>
         </section>
 
-        {draft && schemaReady && <section className={`${styles.panel} ${styles.plannerEditor}`} aria-label={prefs.routines.some((item) => item.id === draft.id) ? "Edit activity" : "New activity"}>
+        {draft && schemaReady && <section ref={editorRef} className={`${styles.panel} ${styles.plannerEditor}`} aria-label={prefs.routines.some((item) => item.id === draft.id) ? "Edit activity" : "New activity"}>
           <div className={styles.between}><div><p className="section-label">{prefs.routines.some((item) => item.id === draft.id) ? "EDIT YOUR PLAN" : "A NEW PLAN"}</p>
             <h2>{prefs.routines.some((item) => item.id === draft.id) ? "Edit activity" : "Plan an activity"}</h2>
             </div>
@@ -215,7 +224,7 @@ export default function ActivityPlanner({ onboarding = false, continuePath = "/"
             </div>
             <div className={styles.plannerReview}><p className="section-label">YOUR PLAN AT A GLANCE</p><strong>{summary(draft, prefs)}</strong>
               <span>{draft.alerts_enabled === false ? "Forecast alerts off" : "Forecast alerts on"}</span></div>
-            <div className={styles.actions}><button className={styles.button} disabled={saving} type="submit">{saving ? "Saving…" : "Save activity"}</button>
+            <div className={styles.actions}><button className={styles.button} disabled={saving} aria-busy={saving || undefined} type="submit">{saving ? "Saving…" : "Save activity"}</button>
               <button className={styles.quiet} disabled={saving} type="button" onClick={cancel}>Cancel</button></div>
           </form>
         </section>}

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 function Answer({ text }: { text: string }) {
   const parts = text.split(/(\[[^\]]+\]\(https:\/\/[^)\s]+\)|\*\*[^*]+\*\*|https:\/\/[^\s)]+)/g);
   return <p className="answer-text">{parts.map((part, index) => {
@@ -15,6 +15,13 @@ export default function AskBox() {
   const [messages, setMessages] = useState<{ id?: number; question: string; answer: string; provider: string }[]>([]);
   const [historyStatus, setHistoryStatus] = useState("Loading recent questions…");
   const [hasMore, setHasMore] = useState(false), [olderBusy, setOlderBusy] = useState(false);
+  const [pending, setPending] = useState("");
+  const thread = useRef<HTMLDivElement>(null), loadingOlder = useRef(false);
+  // Keep the newest exchange in view inside the thread; loading older questions keeps the reader's place.
+  useEffect(() => {
+    if (loadingOlder.current) { loadingOlder.current = false; return; }
+    if (thread.current) thread.current.scrollTop = thread.current.scrollHeight;
+  }, [messages.length, pending]);
   useEffect(() => {
     let active = true;
     void fetch("/api/assistant/history", { cache: "no-store" }).then(async (response) => {
@@ -27,7 +34,7 @@ export default function AskBox() {
   async function loadOlder() {
     const firstId = messages.find((message) => message.id)?.id;
     if (!firstId || olderBusy) return;
-    setOlderBusy(true);
+    setOlderBusy(true); loadingOlder.current = true;
     try {
       const response = await fetch(`/api/assistant/history?before=${firstId}`, { cache: "no-store" });
       if (!response.ok) throw new Error();
@@ -38,7 +45,7 @@ export default function AskBox() {
   }
   async function ask(text: string) {
     if (!text.trim() || busy) return;
-    setBusy(true); setQuestion(text);
+    setBusy(true); setQuestion(text); setPending(text);
     try {
       const history = messages.filter((message) => message.provider !== "unavailable").slice(-4)
         .map(({ question, answer }) => ({ question, answer: answer.slice(0, 3000) }));
@@ -50,7 +57,7 @@ export default function AskBox() {
       setQuestion("");
     } catch (error: unknown) {
       setMessages((previous) => [...previous, { question: text, answer: error instanceof Error ? error.message : "Unable to connect. The condition cards remain available.", provider: "unavailable" }]);
-    } finally { setBusy(false); }
+    } finally { setBusy(false); setPending(""); }
   }
   return <section className="panel assistant-panel" aria-labelledby="assistant-title">
     <div className="section-label">02 / ASK ABOUT YOUR PLAN</div>
@@ -60,18 +67,19 @@ export default function AskBox() {
       {["Should I play basketball near UH at 5 PM?", "What should I check before driving to UH?"].map((text) =>
         <button key={text} disabled={busy} onClick={() => void ask(text)}>{text} <span aria-hidden>↗</span></button>)}
     </div>
-    <div className="chat-thread" aria-live="polite">
+    <div className="chat-thread" aria-live="polite" ref={thread}>
       {historyStatus && <p className="tiny" role="status">{historyStatus}</p>}
-      {hasMore && <button className="secondary" disabled={olderBusy} onClick={() => void loadOlder()}>{olderBusy ? "Loading…" : "Load earlier questions"}</button>}
+      {hasMore && <button className="secondary" disabled={olderBusy} aria-busy={olderBusy || undefined} onClick={() => void loadOlder()}>{olderBusy ? "Loading…" : "Load earlier questions"}</button>}
       {messages.map((message, index) => <article key={index} className="chat-message">
         <p className="question-label">{message.question}</p><span className="tag">{message.provider === "gemini" ? "Gemini · grounded in your briefing" : message.provider}</span>
         <Answer text={message.answer} />
       </article>)}
+      {pending && <article className="chat-message" aria-busy="true"><p className="question-label">{pending}</p><span className="thinking" role="status"><i aria-hidden /><i aria-hidden /><i aria-hidden /> Checking your briefing…</span></article>}
     </div>
     <form className="ask-form" onSubmit={(event) => { event.preventDefault(); void ask(question); }}>
       <label className="sr-only" htmlFor="question">Ask your environmental assistant</label>
       <input id="question" value={question} onChange={(event) => setQuestion(event.target.value)} maxLength={4000} placeholder="What are you planning today?" />
-      <button className="primary" disabled={busy || !question.trim()}>{busy ? "Thinking…" : "Ask ↗"}</button>
+      <button className="primary" disabled={busy || !question.trim()} aria-busy={busy || undefined}>{busy ? "Thinking…" : "Ask ↗"}</button>
     </form>
     <p className="tiny">Readings inform decisions. They don’t establish road safety or replace official guidance.</p>
   </section>;

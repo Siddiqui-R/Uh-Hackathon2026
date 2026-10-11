@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import RecommendationCard from "@/components/RecommendationCard";
 import { forecastTime, forecastFreshness } from "@/lib/forecastPresentation";
 import type { Briefing, UserPrefs } from "@/lib/types";
@@ -21,17 +21,25 @@ export default function RecommendationExperience() {
     finally { setLoading(false); }
   }
   useEffect(() => { void load(); const timer = setInterval(() => void load(true), 60_000); return () => clearInterval(timer); }, []);
+  // Cards render after data arrives, so bring a linked activity (#activity-id) into view once.
+  const scrolled = useRef(false);
+  useEffect(() => {
+    if (scrolled.current || !briefing || !window.location.hash.startsWith("#activity-")) return;
+    scrolled.current = true;
+    const target = document.getElementById(decodeURIComponent(window.location.hash.slice(1)));
+    target?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+  }, [briefing]);
   const outdoor = briefing?.recommendations.filter((card) => card.category === "outdoor") ?? [];
   const supporting = briefing?.recommendations.filter((card) => card.category !== "outdoor") ?? [];
   return <FeatureFrame path="/recommendations" eyebrow="PLAN WITH EVIDENCE" title="Activity recommendations" description="Check your scheduled activities." planningPrefs={prefs}>
     <div className={styles.stack}>
-      {loading && <div className={styles.loading} role="status">Loading forecasts and recommendations…</div>}
+      {loading && <div className={styles.skeletonList} role="status"><p className="loading-line"><span className="spinner" aria-hidden />Loading forecasts and recommendations…</p>{[0, 1].map((key) => <div className={styles.skeletonCard} key={key} aria-hidden><span className="skeleton skeleton-line short" /><span className="skeleton skeleton-value" /><span className="skeleton skeleton-line" /><span className="skeleton skeleton-line" /></div>)}</div>}
       {error && <div className={styles.error} role="alert">{error} <button className={styles.quiet} onClick={() => void load()}>Retry</button> <a className={styles.inlineLink} href="/login">Sign in</a></div>}
       {!loading && briefing && <>
-        <section className={styles.outlookSection}><div className={styles.between}><div><h2>Scheduled outlook</h2><p className={styles.small}>{outdoor.length} activity windows · {briefing.timezone}</p></div><a className={styles.inlineLink} href="/routines">+ Plan an activity</a></div>
+        <section className={styles.outlookSection}><div className={styles.between}><div><h2>Scheduled outlook</h2><p className={styles.small}>{outdoor.length} activity windows · {briefing.timezone} · assembled {forecastTime(briefing.generated_at, briefing.timezone)} · refreshes every minute</p></div><a className={styles.inlineLink} href="/routines">+ Plan an activity</a></div>
           {prefs && !prefs.routines.length && <p className={styles.notice}>General outlook / <a className={styles.inlineLink} href="/routines">Save an activity</a> to check your own place and schedule.</p>}
           {!outdoor.length && <p className={styles.empty}>No upcoming activity windows. Check your saved dates or plan another activity.</p>}
-          <div className={styles.outlookList}>{outdoor.map((card) => <RecommendationCard card={card} timezone={briefing.timezone} key={card.id} />)}</div>
+          <div className={`${styles.outlookList} recommendations`}>{outdoor.map((card) => <RecommendationCard card={card} timezone={briefing.timezone} key={card.id} />)}</div>
         </section>
         <details className={styles.sourceIndex}><summary>Forecast library <span>{briefing.forecasts.length} places · sources and hourly trends</span></summary><p className={styles.small}>Modeled forecasts / separate from AirNow and USGS observations. Briefing assembled {forecastTime(briefing.generated_at, briefing.timezone)}.</p>
           {!briefing.forecasts.length && <p className={styles.empty}>Forecast snapshots are unavailable.</p>}

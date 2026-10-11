@@ -139,11 +139,13 @@ export default function PreferencesEditor({ value, onSave, section }: Props) {
       {!draft.locations.length && <p className="empty-events">Add your first place, then plan an activity there.</p>}
       {draft.locations.map((location, index) => {
         const matchingPreset = HOUSTON_PRESETS.find((p) => p.name === location.name);
+        const planned = value.routines.filter((activity) => activity.location_id === location.id).length;
+        const nearest = findNearestPreset(location.lat, location.lon);
         return (
-          <fieldset key={location.id} className="editor-row" style={{ border: "1px solid var(--line)", borderRadius: 8, padding: 14, marginBottom: 16 }}>
-            <legend style={{ fontWeight: 600 }}><span className="place-index">0{index + 1}</span> {location.name}</legend>
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", width: "100%", alignItems: "flex-end" }}>
-              <label style={{ flex: 2, minWidth: 200 }}>
+          <fieldset key={location.id} className="editor-row">
+            <legend><span className="place-index">0{index + 1}</span> {location.name} <span className="place-kind">{location.kind}</span></legend>
+            <div className="place-fields">
+              <label>
                 Houston landmark
                 <select
                   value={matchingPreset ? matchingPreset.name : "custom"}
@@ -161,7 +163,7 @@ export default function PreferencesEditor({ value, onSave, section }: Props) {
                 </select>
               </label>
 
-              <label style={{ flex: 2, minWidth: 180 }}>
+              <label>
                 Place name
                 <input
                   required
@@ -172,7 +174,7 @@ export default function PreferencesEditor({ value, onSave, section }: Props) {
                 />
               </label>
 
-              <label style={{ flex: 1, minWidth: 120 }}>
+              <label>
                 Type
                 <select value={location.kind} onChange={(event) => changeLocation(index, { kind: event.target.value as Location["kind"] })}>
                   {["home", "school", "work", "other"].map((kind) => (
@@ -184,7 +186,6 @@ export default function PreferencesEditor({ value, onSave, section }: Props) {
               <button
                 type="button"
                 className="quiet"
-                style={{ paddingBottom: 11 }}
                 onClick={() => setDraft((old) => ({ ...old, locations: old.locations.filter((loc) => loc.id !== location.id), routines: old.routines.filter((r) => r.location_id !== location.id) }))}
               >
                 Remove
@@ -193,12 +194,11 @@ export default function PreferencesEditor({ value, onSave, section }: Props) {
 
             {/* Address Search & Autocomplete */}
             <details className="place-search"><summary>Find an address or ZIP code</summary>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <div className="place-search-row">
                 <input
                   type="text"
                   aria-label={`Address or ZIP for ${location.name}`}
                   placeholder="Houston address or ZIP"
-                  style={{ flex: 1, fontSize: 12 }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       e.preventDefault();
@@ -210,8 +210,8 @@ export default function PreferencesEditor({ value, onSave, section }: Props) {
                 <button
                   type="button"
                   className="secondary"
-                  style={{ padding: "8px 14px", fontSize: 12 }}
                   disabled={searchingIndex === index}
+                  aria-busy={searchingIndex === index || undefined}
                   onClick={() => {
                     const inputEl = document.getElementById(`search-input-${location.id}`) as HTMLInputElement | null;
                     if (inputEl) void searchAddress(index, inputEl.value);
@@ -222,39 +222,33 @@ export default function PreferencesEditor({ value, onSave, section }: Props) {
               </div>
 
               {searchError[location.id] && (
-                <p className="tiny" style={{ color: "var(--orange)", marginTop: 6 }}>{searchError[location.id]}</p>
+                <p className="tiny place-search-note" role="status">{searchError[location.id]}</p>
               )}
 
               {searchResults[location.id] && searchResults[location.id]!.length > 0 && (
-                <ul className="place-matches" style={{ listStyle: "none", padding: 0, margin: "8px 0 0", border: "1px solid var(--line)", borderRadius: 6, maxHeight: 160, overflowY: "auto", background: "#fff" }}>
+                <ul className="place-matches" aria-label={`Matches for ${location.name}`}>
                   {searchResults[location.id]!.map((match, mIdx) => (
-                    <li key={mIdx} style={{ borderBottom: "1px solid var(--line)" }}>
+                    <li key={mIdx}>
                       <button
                         type="button"
-                        style={{ width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", cursor: "pointer" }}
                         onClick={() => {
                           changeLocation(index, { name: match.name, lat: match.lat, lon: match.lon });
                           setSearchResults((prev) => ({ ...prev, [location.id]: [] }));
                         }}
                       >
-                        <strong style={{ fontSize: 12 }}>{match.name}</strong>
-                        <span className="tiny" style={{ display: "block", color: "var(--muted)" }}>{match.address}</span>
+                        <strong>{match.name}</strong>
+                        <span className="tiny">{match.address}</span>
                       </button>
                     </li>
                   ))}
                 </ul>
               )}
 
-              {(() => {
-                const nearest = findNearestPreset(location.lat, location.lon);
-                return (
-                  <p className="tiny" style={{ color: "var(--muted)", marginTop: 6 }}>
-                    Location: {nearest.miles < 0.2 ? `At ${nearest.preset.name}` : `Near ${nearest.preset.name} (${nearest.miles.toFixed(1)} miles away)`} · Coordinates ({location.lat.toFixed(4)}, {location.lon.toFixed(4)})
-                  </p>
-                );
-              })()}
+              <p className="tiny place-search-meta">
+                Location: {nearest.miles < 0.2 ? `At ${nearest.preset.name}` : `Near ${nearest.preset.name} (${nearest.miles.toFixed(1)} miles away)`} · Coordinates ({location.lat.toFixed(4)}, {location.lon.toFixed(4)})
+              </p>
             </details>
-            {value.locations.some((saved) => saved.id === location.id) && <div className="place-plan-links"><span className="tiny">{value.routines.filter((activity) => activity.location_id === location.id).length} {value.routines.filter((activity) => activity.location_id === location.id).length === 1 ? "planned activity" : "planned activities"}</span><a href={`/routines?place=${encodeURIComponent(location.id)}`}>Plan here ↗</a></div>}
+            {value.locations.some((saved) => saved.id === location.id) && <div className="place-plan-links"><span className="plan-count"><b>{planned}</b>{planned === 1 ? "planned activity" : "planned activities"}</span><a href={`/routines?place=${encodeURIComponent(location.id)}`}>Plan here ↗</a></div>}
           </fieldset>
         );
       })}
@@ -293,7 +287,7 @@ export default function PreferencesEditor({ value, onSave, section }: Props) {
       <label className="consent"><input type="checkbox" checked={draft.memory_enabled} onChange={(event) => setDraft((old) => ({ ...old, memory_enabled: event.target.checked }))} />Remember these saved preferences with Backboard and use them in Gemini answers.</label>
       <p className="tiny">Gemini receives saved preferences and environmental context when you ask. Turning off memory stops future Backboard use; it does not delete already stored provider memory.</p>
       </>}
-      <button className="primary" disabled={busy}>{busy ? "Saving…" : section === "places" ? "Save places" : "Save my preferences"}</button><p role="status" className="tiny">{message}</p>{section === "places" && value.locations.length > 0 && <div className="planning-next"><span>Next / choose when to go</span><a href="/routines">Plan an activity →</a></div>}
+      <button className="primary" disabled={busy} aria-busy={busy || undefined}>{busy ? "Saving…" : section === "places" ? "Save places" : "Save my preferences"}</button><p role="status" className="tiny save-status">{message}</p>{section === "places" && value.locations.length > 0 && <div className="planning-next"><span>Next / choose when to go</span><a href="/routines">Plan an activity →</a></div>}
     </form>
   </section>;
 }

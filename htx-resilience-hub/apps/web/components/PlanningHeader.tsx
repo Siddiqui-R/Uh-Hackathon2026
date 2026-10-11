@@ -18,11 +18,14 @@ export default function PlanningHeader({ step, prefs }: { step: PlanningStep; pr
     <div className={styles.heading}><div><p className="section-label">HOUSTON / PLANNING DESK</p><h1>{current.label}</h1><p>{current.description}</p></div>
       <span className={styles.registration} aria-hidden>⌖<span>{prefs?.timezone ?? "America/Chicago"}</span></span>
     </div>
-    <nav className={styles.route} aria-label="Planning steps"><ol>{planningSteps.map((item, index) => <li key={item.key}>
+    <nav className={styles.route} aria-label="Planning steps"><ol>{planningSteps.map((item, index) => {
+      const done = Boolean(prefs && (item.key === "places" ? prefs.locations.length : item.key === "activities" ? prefs.routines.length : 0));
+      return <li key={item.key} className={done ? styles.done : undefined}>
       <a href={item.href} aria-current={item.key === step ? "step" : undefined}>
-        <span className={styles.number} aria-hidden>0{index + 1}</span><span><strong>{item.label}</strong><small>{item.cue}{prefs && item.key === "places" ? ` · ${prefs.locations.length} saved` : prefs && item.key === "activities" ? ` · ${prefs.routines.length} planned` : ""}</small></span>
+        <span className={styles.number} aria-hidden>{done && item.key !== step ? "✓" : `0${index + 1}`}</span><span><strong>{item.label}</strong><small>{item.cue}{prefs && item.key === "places" ? ` · ${prefs.locations.length} saved` : prefs && item.key === "activities" ? ` · ${prefs.routines.length} planned` : ""}</small></span>
         <span className={styles.arrow} aria-hidden>↗</span>
       </a>
-    </li>)}</ol></nav>
+    </li>;
+    })}</ol></nav>
   </section>;
 }
