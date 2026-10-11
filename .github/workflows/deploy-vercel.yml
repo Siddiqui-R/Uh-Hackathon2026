@@ -1,0 +1,71 @@
+name: Deploy noach.select
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: noach-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN }}
+      VERCEL_ORG_ID: team_MfbjtVC7nK4BpG7jbfyQGr5W
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: htx-resilience-hub/apps/api/requirements.txt
+      - name: Check deployment credentials
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "::error::Add the VERCEL_DEPLOY_TOKEN repository secret before deploying."
+            exit 1
+          fi
+      - name: Test backend
+        working-directory: htx-resilience-hub
+        run: |
+          python -m pip install -r apps/api/requirements.txt
+          python -m unittest discover -s apps/api/tests -v
+      - name: Package source for both projects
+        run: |
+          python htx-resilience-hub/tools/package_vercel_api.py .deployment/noach-api
+          python htx-resilience-hub/tools/package_vercel_web.py .deployment/noach-web
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          for name, project in (
+              ("noach-api", "prj_N79AGdyovI3DS84sDq4P0pFG4weK"),
+              ("noach-web", "prj_XAspuBcfX5kTtDBh7foPiX8p1l3K"),
+          ):
+              directory = Path(".deployment") / name / ".vercel"
+              directory.mkdir(parents=True, exist_ok=True)
+              (directory / "project.json").write_text(json.dumps({
+                  "projectId": project, "orgId": os.environ["VERCEL_ORG_ID"]
+              }))
+          PY
+      - name: Install Vercel CLI
+        run: npm install --global vercel@63.1.2
+      - name: Deploy API and migrations
+        run: vercel deploy --prod --yes --scope rabeet1 --cwd .deployment/noach-api --token "$VERCEL_TOKEN" --meta gitCommitSha="$GITHUB_SHA"
+      - name: Deploy website
+        run: vercel deploy --prod --yes --scope rabeet1 --cwd .deployment/noach-web --token "$VERCEL_TOKEN" --meta gitCommitSha="$GITHUB_SHA"
+      - name: Verify public services
+        run: |
+          curl --fail --silent --show-error --retry 3 https://noach-api.vercel.app/health
+          curl --fail --silent --show-error --retry 3 --output /dev/null https://noach.select
+          echo "### Deployed https://noach.select" >> "$GITHUB_STEP_SUMMARY"
+          echo "Commit: $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"

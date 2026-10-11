@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "fastapi",
+  "buildCommand": "python -m apps.api.migrate",
   "functions": { "app.py": { "maxDuration": 300 } }
 }
