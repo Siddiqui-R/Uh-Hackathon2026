@@ -58,7 +58,22 @@ def comparable(candidate: dict[str, Any], categories: list[str]) -> bool:
                and (category != "air" or candidate.get("us_aqi") is not None)
                for category in categories)
 
-def build_recommendations(prefs: UserPrefs, forecasts: list[dict[str,Any]], flood: list[dict[str,Any]], now: datetime) -> list[dict[str,Any]]:
+def grid_card(grid: dict[str,Any], location: str, now: datetime) -> dict[str,Any]:
+    card = {"id":"grid","title":"Power grid","location":location,"time":grid.get("updated") or now.isoformat(),"category":"grid",
+            "alternative_time":None,"demo":False}
+    if grid.get("status") != "live":
+        return {**card,"status":"unavailable","reason":"ERCOT grid conditions could not be retrieved. Check ERCOT directly before relying on grid status.",
+                "suggestions":[{"title":"View ERCOT grid conditions","description":"Official statewide supply and demand dashboard.","source_url":grid.get("source_url",SOURCES["grid"])}]}
+    reserves = f" Operating reserves: {grid['reserves_mw']} MW." if grid.get("reserves_mw") else ""
+    if grid["severity"] == "normal":
+        return {**card,"status":"normal conditions","reason":f"ERCOT reports {grid['title']}: {grid['note']}{reserves} No need to shift electricity use. This is statewide status, not an outage report.",
+                "suggestions":[{"title":"View ERCOT grid conditions","description":"Official statewide supply and demand dashboard.","source_url":grid["source_url"]}]}
+    return {**card,"status":"conserve" if grid["severity"] == "watch" else "grid emergency",
+            "reason":f"ERCOT reports {grid['title']}: {grid['note']}{reserves} Consider delaying laundry, dishwashers and EV charging, and pre-cool your home earlier in the day."
+              + (" Charge phones and keep medical devices ready in case of rotating outages." if grid["severity"] == "warning" else ""),
+            "suggestions":suggestions("grid")}
+
+def build_recommendations(prefs: UserPrefs, forecasts: list[dict[str,Any]], flood: list[dict[str,Any]], now: datetime, grid: dict[str,Any] | None = None) -> list[dict[str,Any]]:
     cards: list[dict[str,Any]] = []
     routines = prefs.routines or [Routine(id="daily",activity="Outdoor plans",location_id=(prefs.locations[0].id if prefs.locations else UH.id),local_time=now.astimezone(ZoneInfo(prefs.timezone)).strftime("%H:%M"))]
     for routine in routines:
@@ -105,4 +120,6 @@ def build_recommendations(prefs: UserPrefs, forecasts: list[dict[str,Any]], floo
               "status":"review official updates" if fresh(gauge["time"],now) else "stale observation",
               "reason":f"Nearest monitored gauge: {gauge['station_name']} ({distance(location,gauge):.1f} km away), {gauge['value']} {gauge['unit']}. Nearby readings do not determine whether your route is safe; road-closure coverage is not connected.",
               "alternative_time":None,"suggestions":suggestions("flood"),"demo":"demo" in gauge["station_name"].lower()})
+    if grid is not None:
+        cards.append(grid_card(grid,(prefs.locations[0] if prefs.locations else UH).name,now))
     return cards

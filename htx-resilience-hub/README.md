@@ -69,6 +69,38 @@ The production stack runs migrations, API, frontend, workers and Caddy. It has r
 
 The operations panel shows hosting provider, API/database readiness, latest ingestion, freshness and worker heartbeat without private preferences or keys. A queued demo condition travels through Tiger Cloud → Vultr worker → SSE → the browser. Verify HTTPS on a second device before claiming deployment complete.
 
+## Vercel deployment
+
+The live site is https://noach.select, hosted in the `rabeet1` Vercel account.
+`noach-select` hosts Next.js; `noach-api` hosts FastAPI at https://noach-api.vercel.app.
+Tiger Cloud remains the database. The backend requires an internal token for all application routes.
+
+From this directory, package source without local credentials and deploy the two projects:
+
+```powershell
+.\.venv\Scripts\python.exe tools/package_vercel_api.py ../.deployment/noach-api
+.\.venv\Scripts\python.exe tools/package_vercel_web.py ../.deployment/noach-web
+npx vercel deploy --prod --yes --scope rabeet1 --cwd ../.deployment/noach-api
+npx vercel deploy --prod --yes --scope rabeet1 --cwd ../.deployment/noach-web
+```
+
+Set backend production variables `DATABASE_URL`, `INTERNAL_API_TOKEN`, `NOACH_ENV=production`,
+`NOACH_DEMO_MODE=false`, `HOSTING_PROVIDER=Vercel`, and the optional provider keys/models.
+Set frontend `API_BASE_URL=https://noach-api.vercel.app`, the same `INTERNAL_API_TOKEN`,
+`NOACH_ENV=production`, and optional ElevenLabs settings. Apply migrations before deployment
+with `python -m apps.api.migrate` using the production database connection.
+
+Vercel runs bounded functions rather than the continuous Docker worker. While the dashboard
+is open, briefing refreshes run due jobs under a database lock: flood/forecast ingestion at
+15-minute intervals and alert evaluation at one-minute intervals. Demo requests also trigger
+evaluation. Between visits there is no continuous scheduler; unattended alerts require a
+separate worker or scheduler. Alert streams reconnect after four minutes and retain their
+event cursor. Voice and Backboard memory are unavailable until their keys are configured.
+These deployments use CLI source snapshots; automatic GitHub deployments are not connected.
+
+Porkbun DNS: root A records `216.198.79.1` and `64.29.17.1`; `www` CNAME
+`202c49f23a2e50a0.vercel-dns-017.com`. Vercel manages HTTPS for both domains.
+
 ## Validation
 
 ```sh

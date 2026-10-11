@@ -2,19 +2,15 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import AskBox from "@/components/AskBox";
-import ActivityComparison from "@/components/ActivityComparison";
 import PreferencesEditor from "@/components/PreferencesEditor";
 import ModuleCard from "@/components/ModuleCard";
+import RecommendationCard from "@/components/RecommendationCard";
 import { demoBriefing, initialPreferences } from "@/lib/demo";
+import { localTime } from "@/lib/format";
 import type { AirStation, AnomalyEvent, Briefing, EnvironmentalAlert, HazardReading, Operations, UserPrefs } from "@/lib/types";
 
 const HazardMap = dynamic(() => import("@/components/HazardMap"), { ssr: false, loading: () => <div className="map-loading">Loading Houston map…</div> });
-function localTime(value: string, zone = "America/Chicago"): string {
-  return new Date(value).toLocaleTimeString("en-US", { timeZone: zone, hour: "numeric", minute: "2-digit" });
-}
-function localDateTime(value: string, zone = "America/Chicago"): string {
-  return new Intl.DateTimeFormat("en-US", { timeZone: zone, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
-}
+const ConditionsMap = dynamic(() => import("@/components/ConditionsMap"), { ssr: false, loading: () => <div className="map-loading">Loading Houston map…</div> });
 function featuredGauge(rows: HazardReading[]): HazardReading | undefined {
   return rows.filter((row) => row.metric.toLowerCase().includes("gage height") && row.unit === "ft")
     .sort((left, right) => Date.parse(right.time) - Date.parse(left.time))[0];
@@ -50,6 +46,7 @@ export default function Home() {
   const hasDemoSource = view && Object.values(view.source_status).some((s) => s === "demo");
   const temporary = view?.source_status.preferences === "temporary memory";
   const unreadCount = alerts.filter((alert) => !alert.read_at).length;
+  const grid = view?.grid;
 
   const refresh = useCallback(async () => {
     try {
@@ -199,7 +196,7 @@ export default function Home() {
   }
 
   return <div className="app-shell">
-    <header className="site-header"><a href="/" className="wordmark"><span className="brand-icon">✳</span> Noach Select</a><nav aria-label="Main navigation"><a href="#today">Overview</a><a href="#your-plan">Your plan</a><a href="#monitor">Live monitor</a><a href="#alerts">Alerts <span className="nav-count" aria-label={`${unreadCount} unread alerts`}>{unreadCount}</span></a></nav><span className="header-location"><span className="live-dot" /> HOUSTON, TX</span></header>
+    <header className="site-header"><a href="/" className="wordmark"><span className="brand-icon">✳</span> Noach Select</a><nav aria-label="Main navigation"><a href="#today">Overview</a><a href="#map">Map</a><a href="#monitor">Live monitor</a><a href="#alerts">Alerts <span className="nav-count" aria-label={`${unreadCount} unread alerts`}>{unreadCount}</span></a></nav><span className="header-location"><span className="live-dot" /> HOUSTON, TX</span></header>
     <main>
       <section className="hero" id="today"><div><p className="section-label">ENVIRONMENTAL INTELLIGENCE FOR HOUSTON</p><h1>Know what’s changing.<br /><em>Plan around it.</em></h1><p className="hero-copy">Weather, air and bayou conditions in one place. Get a grounded answer for your plans and a heads-up when a nearby reading changes.</p><div className="hero-actions"><a className="primary" href="#your-plan">Plan an activity ↗</a><a className="secondary" href="#monitor">Explore live monitor</a></div></div><div className="hero-stamp"><span className="stamp-symbol" aria-hidden>◎</span><span>LOCAL SIGNALS<br />BETTER DECISIONS</span></div></section>
       {error && <div className="notice" role="status">{error}</div>}
@@ -217,17 +214,15 @@ export default function Home() {
         <section className="panel briefing-panel"><div className="panel-heading"><div><p className="section-label">YOUR OUTDOOR PLAN</p><h2>A clearer time to go</h2></div><span className="brief-icon" aria-hidden>☀</span></div>
           <div className="weather-strip"><div><span className="big-number">{current?.temperature_2m !== undefined ? Math.round(current.temperature_2m) + "°" : "—"}</span><span className="tiny">{forecast?.location.name ?? "Houston"} · {demo ? "illustrative preview" : "model forecast"}</span></div><div><strong>{current?.apparent_temperature !== undefined ? Math.round(current.apparent_temperature) + "°F" : "—"}</strong><span className="tiny">Feels like</span></div><div><strong>{current?.us_aqi !== undefined ? Math.round(current.us_aqi) : "—"}</strong><span className="tiny">{demo ? "Demo US AQI" : "Modeled US AQI"}</span></div></div>
           {!view && <p className="muted">Gathering environmental context…</p>}
-          <div className="recommendations">{view?.recommendations.map((card) => <article className="recommendation" key={card.id}>
-            <div className="recommendation-heading"><strong>{card.title}</strong><span className="tag">{card.demo ? "DEMO" : card.status}</span></div>
-            <p className="tiny">{card.location} · {localDateTime(card.time, view.timezone)}</p><p>{card.reason}</p>
-            {card.category === "outdoor" && <ActivityComparison card={card} timezone={view.timezone} />}
-            <div className="action-links">{card.suggestions.map((suggestion) => <a key={suggestion.title} href={suggestion.source_url} target="_blank" rel="noreferrer">{suggestion.title} ↗</a>)}</div>
-          </article>)}</div>
+          <div className="recommendations">{view?.recommendations.map((card) => <RecommendationCard key={card.id} card={card} timezone={view.timezone} />)}</div>
           <button className="secondary listen-button" disabled={!voice || audioBusy || !view} onClick={() => void play((demo ? "Demonstration briefing. " : "") + (view?.recommendations.map((r) => r.title + ". " + r.reason).join(" ") ?? ""))}>{audioBusy ? "Preparing audio…" : "◖ Listen to my briefing"}</button>
           <p className="tiny">{view ? "Updated " + localTime(view.generated_at, view.timezone) : "Waiting for data"} · <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Open-Meteo</a> / <a href="https://atmosphere.copernicus.eu/" target="_blank" rel="noreferrer">CAMS</a></p>
         </section>
       </div>
-      <section id="monitor" className="monitor-section"><div className="section-heading"><div><p className="section-label">03 / WATCHING FOR CHANGE</p><h2>Live environmental monitor</h2></div><span className="tag"><span className="live-dot" /> {monitorStatus}</span></div>
+      <section id="map" className="map-section"><div className="section-heading"><div><p className="section-label">03 / CONDITIONS BY PLACE</p><h2>Check any spot in Houston.</h2></div><span className="tiny">Air quality, heat, rain, bayou gauges and the power grid, with advice that follows where you tap</span></div>
+        <ConditionsMap readings={view?.hazards ?? []} prefs={prefs} grid={grid} />
+      </section>
+      <section id="monitor" className="monitor-section"><div className="section-heading"><div><p className="section-label">04 / WATCHING FOR CHANGE</p><h2>Live environmental monitor</h2></div><span className="tag"><span className="live-dot" /> {monitorStatus}</span></div>
         <div className="monitor-grid"><div className="panel monitor-map"><HazardMap readings={view?.hazards ?? []} locations={prefs.locations} anomalies={anomalies} airStations={airStations} /><Sparkline points={history} /><p className="tiny">{view?.coverage}</p></div>
           <div className="panel event-panel"><div className="panel-heading"><div><p className="section-label">STATION SIGNALS</p><h3>Unusual readings</h3></div><span className="tag">{anomalies.length} recorded</span></div>
             <p className="muted">New station readings are compared with that station’s recent history. An anomaly needs review; it does not confirm an emergency.</p>
@@ -236,14 +231,14 @@ export default function Home() {
           </div></div>
       </section>
       <div className="settings-anchor" id="settings"><PreferencesEditor value={prefs} onSave={save} /></div>
-      <section id="alerts" className="panel alerts-panel"><div className="panel-heading"><div><p className="section-label">04 / PERSONAL HEADS-UP</p><h2>Alerts for your places and plans</h2></div><span className="tag">{unreadCount} unread · {stream}</span></div>
+      <section id="alerts" className="panel alerts-panel"><div className="panel-heading"><div><p className="section-label">05 / PERSONAL HEADS-UP</p><h2>Alerts for your places and plans</h2></div><span className="tag">{unreadCount} unread · {stream}</span></div>
         <div className="notification-controls"><button className="secondary" onClick={() => void enableNotifications()}>{notifications}</button><label className="voice-toggle"><input type="checkbox" checked={voice} onChange={(event) => { setVoice(event.target.checked); voiceRef.current = event.target.checked; if (!event.target.checked) audioRef.current?.pause(); }} />Enable voice briefings</label></div>
         <p className="tiny">Notifications work while this dashboard is running. Routine checks use your saved forecast thresholds; station alerts describe observed changes. These are not official emergency alerts.</p>
         {audioError && <p className="notice" role="status">{audioError}</p>}
         {!alerts.length && <div className="empty-alert"><span aria-hidden>◎</span><div><strong>We’ll let you know when conditions change.</strong><p className="muted">Save a routine to personalize your alerts, or try a clearly labeled demonstration.</p></div></div>}
         <div className="alert-list" aria-live="polite">{alerts.map((alert) => <article className={`alert-card ${alert.read_at ? "is-read" : "is-unread"}`} key={alert.id}><div className="alert-meta"><span className="tag">{alert.demo ? "DEMO" : alert.severity} · {alert.hazard}</span><span className="tiny">{alert.read_at ? "Read" : "Unread"}</span></div><p>{alert.message}</p><span className="tiny">{localTime(alert.time)}</span><div className="action-links">{alert.suggestions.map((s) => <a href={s.source_url} key={s.title} target="_blank" rel="noreferrer">{s.title} ↗</a>)}</div><button className="quiet alert-read-toggle" disabled={readingId === alert.id} onClick={() => void toggleAlertRead(alert)}>{readingId === alert.id ? "Saving…" : alert.read_at ? "Mark unread" : "Mark as read"}</button></article>)}</div>
       </section>
-      <details className="panel operations"><summary><span><span className="live-dot" /> Always working between questions</span><span className="tiny">{operations?.hosting ?? "Checking deployment"} · View system status +</span></summary>
+      <details className="panel operations"><summary><span><span className="live-dot" /> Keeping your context current</span><span className="tiny">{operations?.hosting ?? "Checking deployment"} · View system status +</span></summary>
         <p className="muted">The cloud workers collect environmental data every 15 minutes and evaluate routines every minute.</p>
         <div className="status-grid"><div><span className="tiny">API</span><strong>{operations?.api ?? "unavailable"}</strong></div><div><span className="tiny">Tiger Data</span><strong>{operations?.database ?? "unavailable"}</strong></div><div><span className="tiny">Latest flood observation</span><strong>{operations?.latest_flood_observation ? localTime(operations.latest_flood_observation) : "No observation"}</strong></div></div>
         {operations?.jobs.map((job) => <p key={job.job} className="tiny">{job.job.replaceAll("_", " ")} · {job.status} · heartbeat {localTime(job.heartbeat)} · last success {job.last_success ? localTime(job.last_success) : "never"} · {job.rows_written} rows</p>)}

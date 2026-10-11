@@ -29,8 +29,26 @@ export interface Forecast {
   location: Location; retrieved_at: string; hours: ForecastHour[]; source_status: Record<string,string>;
   attribution: string; source_url: string; storage: string;
 }
+export interface GridStatus {
+  status: "live" | "unavailable" | "demo"; severity: Severity | null; title: string; note: string;
+  eea_level: number | null; reserves_mw: string | null; updated: string | null; scope: string; source_url: string;
+}
+export interface AreaCell {
+  lat: number; lon: number; us_aqi?: number; pm2_5?: number; ozone?: number;
+  apparent_temperature?: number; precipitation_probability?: number;
+}
+export interface AreaConditions {
+  generated_at: string; bounds: { south: number; north: number; west: number; east: number };
+  cell: { dlat: number; dlon: number }; cells: AreaCell[]; source_status: Record<string,string>; attribution: string;
+}
+export interface PlaceMatch { name: string; address: string; lat: number; lon: number; }
+export interface PointConditions {
+  generated_at: string; timezone: string; location: Location; current: ForecastHour;
+  nearby_gauges: (HazardReading & { distance_km: number })[]; grid: GridStatus;
+  recommendations: Recommendation[]; source_status: Record<string,string>; coverage: string;
+}
 export interface Briefing {
-  generated_at: string; timezone: string; locations: Location[]; forecasts: Forecast[]; hazards: HazardReading[];
+  generated_at: string; timezone: string; locations: Location[]; forecasts: Forecast[]; hazards: HazardReading[]; grid?: GridStatus;
   recommendations: Recommendation[]; source_status: Record<string,string>; coverage: string;
 }
 export interface EnvironmentalAlert {
