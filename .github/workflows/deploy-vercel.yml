@@ -41,18 +41,17 @@ jobs:
         run: |
           python -m pip install -r apps/api/requirements.txt
           python -m unittest discover -s apps/api/tests -v
-      - name: Package source for both projects
+      - name: Package API and link Vercel projects
         run: |
           python htx-resilience-hub/tools/package_vercel_api.py .deployment/noach-api
-          python htx-resilience-hub/tools/package_vercel_web.py .deployment/noach-web
           python - <<'PY'
           import json, os
           from pathlib import Path
-          for name, project in (
-              ("noach-api", "prj_N79AGdyovI3DS84sDq4P0pFG4weK"),
-              ("noach-web", "prj_XAspuBcfX5kTtDBh7foPiX8p1l3K"),
+          for root, project in (
+              (Path(".deployment/noach-api"), "prj_N79AGdyovI3DS84sDq4P0pFG4weK"),
+              (Path("."), "prj_XAspuBcfX5kTtDBh7foPiX8p1l3K"),
           ):
-              directory = Path(".deployment") / name / ".vercel"
+              directory = root / ".vercel"
               directory.mkdir(parents=True, exist_ok=True)
               (directory / "project.json").write_text(json.dumps({
                   "projectId": project, "orgId": os.environ["VERCEL_ORG_ID"]
@@ -67,7 +66,7 @@ jobs:
       - name: Deploy website
         env:
           VERCEL_PROJECT_ID: prj_XAspuBcfX5kTtDBh7foPiX8p1l3K
-        run: vercel deploy --prod --yes --cwd .deployment/noach-web --token "$VERCEL_WEB_TOKEN" --meta gitCommitSha="$GITHUB_SHA"
+        run: vercel deploy --prod --yes --cwd . --token "$VERCEL_WEB_TOKEN" --meta gitCommitSha="$GITHUB_SHA"
       - name: Verify public services
         run: |
           curl --fail --silent --show-error --retry 3 https://noach-api.vercel.app/health
