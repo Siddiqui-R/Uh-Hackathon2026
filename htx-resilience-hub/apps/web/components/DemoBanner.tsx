@@ -7,5 +7,5 @@ export default function DemoBanner() {
     void fetch("/api/session", { cache: "no-store" }).then((response) => response.ok ? response.json() : null)
       .then((session: { mode?: string } | null) => setDemo(session?.mode === "demo")).catch(() => {});
   }, []);
-  return demo ? <div className="demo-banner">Browser demo · Places, activities, conditions and outlooks are illustrative. Changes stay in this browser for up to seven days or until you exit. <a href="/signup">Create an account</a> for your own plan.</div> : null;
+  return demo ? <div className="demo-banner">Browser demo · Sample places and activities. Activity outlooks use live modeled forecasts when available; other conditions are illustrative. Changes stay in this browser for up to seven days or until you exit. <a href="/signup">Create an account</a> for your own plan.</div> : null;
 }

@@ -1,7 +1,8 @@
 import "server-only";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import type { Location, Routine, UserPrefs } from "./types";
+import type { Briefing, Location, Routine, UserPrefs } from "./types";
+import { backendUrl } from "./backend";
 import { demoArea, demoBriefingFor, demoPoint } from "./demoData";
 import { readDemoPreferences, setDemoPreferences } from "./demoSession";
 
@@ -31,6 +32,19 @@ function validPreferences(value: unknown): value is UserPrefs {
     activityIds.add(item.id);
   }
   return ["feels_like_f", "us_aqi"].every((key) => typeof prefs.thresholds[key] === "number" && prefs.thresholds[key] >= 0 && prefs.thresholds[key] <= 500);
+}
+
+// Activity outlooks use the backend's modeled forecast for each demo place; the illustrative briefing is the fallback.
+async function demoBriefing(prefs: UserPrefs): Promise<Briefing> {
+  try {
+    const response = await fetch(backendUrl("/api/demo/briefing"), { method: "POST", cache: "no-store", signal: AbortSignal.timeout(25_000),
+      headers: { "Content-Type": "application/json", "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "" }, body: JSON.stringify(prefs) });
+    if (response.ok) {
+      const live = await response.json() as Briefing;
+      if (live.source_status?.weather === "live model" && Array.isArray(live.recommendations)) return live;
+    }
+  } catch { /* fall through to the illustrative values */ }
+  return demoBriefingFor(prefs);
 }
 
 function demoEvent(kind: "air" | "flood") {
@@ -69,10 +83,13 @@ export async function demoApi(request: Request, path: string): Promise<Response>
   if (request.method === "POST" && path === "ask") {
     const body = await request.json() as { question?: unknown };
     if (typeof body.question !== "string" || !body.question.trim() || body.question.length > 4000) return json({ error: "Enter a question." }, 400);
-    const first = demoBriefingFor(prefs).recommendations[0];
+    const cards = (await demoBriefing(prefs)).recommendations.filter((item) => item.category === "outdoor");
     const subject = prefs.routines.find((item) => body.question!.toString().toLowerCase().includes(item.activity.toLowerCase())) ?? prefs.routines[0];
-    const detail = demoBriefingFor(prefs).recommendations.find((item) => item.id === subject?.id) ?? first;
-    return NextResponse.json({ answer: detail ? `In this illustrative demo, ${detail.title.toLowerCase()} at ${detail.location} is marked "${detail.status}." ${detail.reason} Open Outlook to compare the sample values. These are not live conditions.` : "Add an activity and a place to see a sample outlook. This demo does not use live conditions.", provider: "demo" },
+    const detail = cards.find((item) => item.id === subject?.id) ?? cards[0];
+    const answer = !detail ? "Add an activity and a place to see an outlook in this demo."
+      : detail.demo ? `In this illustrative demo, ${detail.title.toLowerCase()} at ${detail.location} is marked "${detail.status}." ${detail.reason} Open Outlook to compare the sample values. These are not live conditions.`
+      : `From the modeled forecast for ${detail.location}, ${detail.title.toLowerCase()} is marked "${detail.status}." ${detail.reason} Open Outlook to compare times. This demo assistant reads the forecast outlook only and is not official guidance.`;
+    return NextResponse.json({ answer, provider: "demo" },
       { headers: { "Cache-Control": "no-store", "X-AI-Provider": "demo" } });
   }
   if (request.method === "POST" && path === "demo/simulate-anomaly") {
@@ -84,7 +101,7 @@ export async function demoApi(request: Request, path: string): Promise<Response>
   }
   if (request.method !== "GET") return json({ error: "Not found" }, 404);
   if (path === "prefs") return json({ preferences: prefs, storage: "this browser demo", planner_schema_version: 2 });
-  if (path === "briefing") return json(demoBriefingFor(prefs));
+  if (path === "briefing") return json(await demoBriefing(prefs));
   if (path === "status") return json({ api: "Demo", database: "Browser demo", hosting: "Illustrative preview", latest_flood_observation: new Date().toISOString(), jobs: [], integrations: {} });
   if (path === "anomalies") {
     return json([demoEvent(cookies().get("noach_demo_event")?.value === "flood" ? "flood" : "air")]);

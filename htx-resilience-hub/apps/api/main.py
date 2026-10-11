@@ -26,7 +26,7 @@ from apps.api.models import AskRequest, AskResponse, UserPrefs, HazardReading, A
 from apps.api.environment import hazards
 from apps.api.conditions import area, geocode, point, in_limits
 from apps.api.providers import gemini_answer, memory_get, memory_sync
-from apps.api.service import briefing
+from apps.api.service import briefing, briefing_for
 from apps.api.store import get_prefs, save_prefs, alerts_after, persist_alert, set_alert_read, conversation_history, save_conversation_turn, demo_mode, temporary_storage, DEMO_ALERTS
 from apps.api.recommendations import suggestions
 from apps.api.anomaly_detection import detect_pm25, detect_rising_water
@@ -208,6 +208,18 @@ async def briefing_route(request: Request, user_id: str = Query(min_length=1,max
         return await briefing(user_id)
     except Exception:
         raise HTTPException(503,"Briefing unavailable; check database settings or explicitly enable NOACH_DEMO_MODE")
+
+@app.post("/api/demo/briefing")
+async def demo_briefing(prefs: UserPrefs) -> dict:
+    # Stateless: the browser demo's places and activities are evaluated against live forecasts, never stored.
+    if prefs.user_id != "demo_browser":
+        raise HTTPException(404,"Not found")
+    if any(not in_limits(loc.lat,loc.lon) for loc in prefs.locations):
+        raise HTTPException(422,"Demo places are limited to the greater Houston area")
+    try:
+        return await briefing_for(prefs,"this browser demo",persist=False)
+    except Exception:
+        raise HTTPException(503,"Live forecasts for the demo are unavailable")
 
 @app.post("/api/ask",response_model=AskResponse)
 async def ask(payload: AskRequest, response: Response, request: Request) -> AskResponse:

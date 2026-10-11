@@ -4,13 +4,17 @@ from datetime import datetime, timezone
 from typing import Any
 from .conditions import grid_status
 from .environment import UH, forecast, hazards
+from .models import UserPrefs
 from .recommendations import build_recommendations
 from .store import get_prefs
 
 async def briefing(user_id: str) -> dict[str,Any]:
     prefs,storage = await get_prefs(user_id)
+    return await briefing_for(prefs,storage)
+
+async def briefing_for(prefs: UserPrefs, storage: str, persist: bool = True) -> dict[str,Any]:
     locations = prefs.locations or [UH]
-    forecasts = await asyncio.gather(*(forecast(loc) for loc in locations))
+    forecasts = await asyncio.gather(*(forecast(loc,persist=persist) for loc in locations))
     (flood,mode),grid = await asyncio.gather(hazards(),grid_status())
     now = datetime.now(timezone.utc)
     return {"generated_at":now.isoformat(),"timezone":prefs.timezone,"locations":[loc.model_dump() for loc in locations],

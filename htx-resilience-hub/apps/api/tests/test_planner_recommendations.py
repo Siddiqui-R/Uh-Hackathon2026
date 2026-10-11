@@ -140,3 +140,23 @@ class PlannerRecommendationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DemoBriefingTests(unittest.TestCase):
+    def test_demo_briefing_is_stateless_and_bounded(self):
+        payload = UserPrefs(user_id="demo_browser", locations=[PLACE], routines=[
+            Routine(id="walk", activity="Walk", location_id="park", local_time="10:00")]).model_dump(mode="json")
+        with patch.dict(os.environ, {"NOACH_DEMO_MODE": "true", "NOACH_DEMO_STORAGE": "memory",
+                                  "NOACH_ENV": "development", "INTERNAL_API_TOKEN": ""}), \
+             patch("apps.api.main.briefing_for", new=AsyncMock(return_value={"recommendations": []})) as built, \
+             patch("apps.api.main.get_prefs", new=AsyncMock()) as loaded, \
+             patch("apps.api.main.save_prefs", new=AsyncMock()) as saved:
+            with TestClient(app) as client:
+                self.assertEqual(client.post("/api/demo/briefing", json=payload).status_code, 200)
+                self.assertFalse(built.await_args.kwargs["persist"])
+                self.assertEqual(client.post("/api/demo/briefing", json={**payload, "user_id": "acct:1"}).status_code, 404)
+                far = {**payload, "locations": [{**payload["locations"][0], "lat": 40.7, "lon": -74.0}]}
+                self.assertEqual(client.post("/api/demo/briefing", json=far).status_code, 422)
+            loaded.assert_not_awaited()
+            saved.assert_not_awaited()
+            self.assertEqual(built.await_count, 1)

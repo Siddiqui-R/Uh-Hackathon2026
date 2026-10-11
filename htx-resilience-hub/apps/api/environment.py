@@ -49,8 +49,9 @@ async def hazards() -> tuple[list[dict[str, Any]], str]:
           "lat":29.7752,"lon":-95.3972,"metric":"Gage height, feet","value":7.71,"unit":"ft",
           "severity":"unrated","time":datetime.now(UTC).isoformat()}], "demo"
 
-async def forecast(location: Location, force: bool = False) -> dict[str, Any]:
-    key,now = location_key(location),datetime.now(UTC)
+async def forecast(location: Location, force: bool = False, persist: bool = True) -> dict[str, Any]:
+    # Unsaved snapshots are cached apart so they never stand in for a persisted one.
+    key,now = location_key(location)+("" if persist else ":unsaved"),datetime.now(UTC)
     cached = CACHE.get(key)
     if cached and not force and now-cached[0] < timedelta(minutes=15):
         # Share environmental values by coordinates, never another profile's place name or ID.
@@ -110,7 +111,7 @@ async def forecast(location: Location, force: bool = False) -> dict[str, Any]:
                 "source_status":statuses,"attribution":"Weather: Open-Meteo. Air quality: CAMS / Open-Meteo modeled forecasts, not a local sensor.",
                 "source_url":"https://open-meteo.com/en/docs/air-quality-api","storage":"unavailable"}
     if any(s == "live model" for s in statuses.values()):
-        if temporary_storage():
+        if temporary_storage() or not persist:
             snapshot["storage"] = "temporary (not persisted)"
         else:
             try:
