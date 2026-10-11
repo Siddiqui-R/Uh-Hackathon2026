@@ -61,9 +61,9 @@ jobs:
       - name: Install Vercel CLI
         run: npm install --global vercel@63.1.2
       - name: Deploy API and migrations
-        run: vercel deploy --prod --yes --scope rabeet1 --cwd .deployment/noach-api --token "$VERCEL_API_TOKEN" --meta gitCommitSha="$GITHUB_SHA"
+        run: vercel deploy --prod --yes --cwd .deployment/noach-api --token "$VERCEL_API_TOKEN" --meta gitCommitSha="$GITHUB_SHA"
       - name: Deploy website
-        run: vercel deploy --prod --yes --scope rabeet1 --cwd .deployment/noach-web --token "$VERCEL_WEB_TOKEN" --meta gitCommitSha="$GITHUB_SHA"
+        run: vercel deploy --prod --yes --cwd .deployment/noach-web --token "$VERCEL_WEB_TOKEN" --meta gitCommitSha="$GITHUB_SHA"
       - name: Verify public services
         run: |
           curl --fail --silent --show-error --retry 3 https://noach-api.vercel.app/health
