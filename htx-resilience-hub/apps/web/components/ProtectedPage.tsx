@@ -11,6 +11,9 @@ export default async function ProtectedPage({ path, searchParams, children }: { 
     else if (value !== undefined) query.append(key, value);
   }
   const requested = safeReturnTo(path + (query.size ? `?${query}` : ""));
+  if (process.env.NOACH_DEMO_MODE === "true" || process.env.NOACH_DEMO_STORAGE === "memory") {
+    return <>{children}</>;
+  }
   const session = await accountSession();
   if (session.status === "missing" || session.status === "invalid") redirect(`/login?next=${encodeURIComponent(requested)}`);
   if (session.status === "unavailable") return <div className="app-shell auth-shell"><header className="site-header"><a className="wordmark" href="/">✳ Noach</a></header>

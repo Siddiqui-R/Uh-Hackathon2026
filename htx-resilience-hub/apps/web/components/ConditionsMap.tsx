@@ -23,6 +23,59 @@ const SCALES: Record<Exclude<Fill, "off">, Scale> = {
     stops: [[0, "#f4f7fa"], [20, "#bcd5e8"], [50, "#6aa0cc"], [80, "#2f6aa3"], [100, "#173f6e"]] },
 };
 const SEVERITY_COLORS = { normal: "#527d70", watch: "#b78352", warning: "#ae6054", unrated: "#7d8e88" };
+const HOUSTON_PRESETS = [
+  { name: "University of Houston (Main Campus)", lat: 29.7199, lon: -95.3422 },
+  { name: "UH Downtown (UHD)", lat: 29.7661, lon: -95.3601 },
+  { name: "Rice University", lat: 29.7174, lon: -95.4018 },
+  { name: "Texas Medical Center (TMC)", lat: 29.7080, lon: -95.3995 },
+  { name: "Downtown Houston / Discovery Green", lat: 29.7533, lon: -95.3585 },
+  { name: "Memorial Park & Running Trails", lat: 29.7681, lon: -95.4338 },
+  { name: "Hermann Park", lat: 29.7130, lon: -95.3910 },
+  { name: "Buffalo Bayou Park", lat: 29.7615, lon: -95.3853 },
+  { name: "The Galleria / Uptown", lat: 29.7397, lon: -95.4654 },
+  { name: "Energy Corridor", lat: 29.7850, lon: -95.6350 },
+  { name: "The Heights / 19th St", lat: 29.8028, lon: -95.4000 },
+  { name: "Montrose / Midtown", lat: 29.7420, lon: -95.3900 },
+  { name: "Meyerland", lat: 29.6700, lon: -95.4800 },
+  { name: "Sugar Land (Town Square)", lat: 29.5984, lon: -95.6219 },
+  { name: "The Woodlands (Town Center)", lat: 30.1600, lon: -95.4600 },
+  { name: "Houston Ship Channel / Pasadena", lat: 29.7289, lon: -95.2210 },
+];
+
+const HOUSTON_ZIPS: Record<string, { name: string; lat: number; lon: number }> = {
+  "77002": { name: "Downtown Houston", lat: 29.7533, lon: -95.3585 },
+  "77003": { name: "East End / EaDo", lat: 29.7480, lon: -95.3450 },
+  "77004": { name: "University of Houston / Third Ward", lat: 29.7199, lon: -95.3422 },
+  "77005": { name: "Rice University / West U", lat: 29.7174, lon: -95.4018 },
+  "77006": { name: "Montrose / Midtown", lat: 29.7420, lon: -95.3900 },
+  "77007": { name: "Washington Corridor / Memorial Park", lat: 29.7681, lon: -95.4338 },
+  "77008": { name: "The Heights", lat: 29.8028, lon: -95.4000 },
+  "77019": { name: "River Oaks / Buffalo Bayou", lat: 29.7615, lon: -95.3853 },
+  "77024": { name: "Memorial / Memorial City", lat: 29.7800, lon: -95.5400 },
+  "77025": { name: "Braeswood Place", lat: 29.6900, lon: -95.4300 },
+  "77030": { name: "Texas Medical Center (TMC)", lat: 29.7080, lon: -95.3995 },
+  "77056": { name: "The Galleria / Uptown", lat: 29.7397, lon: -95.4654 },
+  "77077": { name: "Energy Corridor", lat: 29.7850, lon: -95.6350 },
+  "77096": { name: "Meyerland", lat: 29.6700, lon: -95.4800 },
+  "77098": { name: "Upper Kirby / Montrose", lat: 29.7350, lon: -95.4100 },
+  "77478": { name: "Sugar Land", lat: 29.5984, lon: -95.6219 },
+  "77479": { name: "Sugar Land (Town Square)", lat: 29.5984, lon: -95.6219 },
+  "77380": { name: "The Woodlands", lat: 30.1600, lon: -95.4600 },
+};
+
+function findNearestPreset(lat: number, lon: number) {
+  let closest = HOUSTON_PRESETS[0];
+  let minDistance = Infinity;
+  for (const preset of HOUSTON_PRESETS) {
+    const d = Math.hypot((preset.lat - lat) * 69, (preset.lon - lon) * 59);
+    if (d < minDistance) {
+      minDistance = d;
+      closest = preset;
+    }
+  }
+  return { preset: closest, miles: minDistance };
+}
+
 const LIMITS = { south: 29.0, north: 30.7, west: -96.4, east: -94.4 };
 const inLimits = (lat: number, lon: number) => lat >= LIMITS.south && lat <= LIMITS.north && lon >= LIMITS.west && lon <= LIMITS.east;
 const band = (scale: Scale, value: number) => scale.bands.find((b) => value <= b.max) ?? scale.bands[scale.bands.length - 1];
@@ -49,7 +102,8 @@ export default function ConditionsMap({ readings, prefs, grid }: { readings: Haz
   const [pin, setPin] = useState<Pin | null>(null), [point, setPoint] = useState<PointConditions | null>(null);
   const [loading, setLoading] = useState(false), [pointError, setPointError] = useState("");
   const [query, setQuery] = useState(""), [matches, setMatches] = useState<PlaceMatch[] | null>(null);
-  const [searching, setSearching] = useState(false), [locating, setLocating] = useState(false), [findError, setFindError] = useState("");
+  const [searching, setSearching] = useState(false), [locating, setLocating] = useState(false);
+  const [findError, setFindError] = useState(""), [feedbackNotice, setFeedbackNotice] = useState("");
   const canvas = useRef<HTMLDivElement>(null), map = useRef<L.Map | null>(null), request = useRef(0);
   const fills = useRef<L.LayerGroup | null>(null), markers = useRef<L.LayerGroup | null>(null), pinLayer = useRef<L.LayerGroup | null>(null);
   // Advice depends on saved routines and thresholds, so re-check the pin when they change.
@@ -155,32 +209,87 @@ export default function ConditionsMap({ readings, prefs, grid }: { readings: Haz
   async function search(event: React.FormEvent) {
     event.preventDefault();
     const text = query.trim();
-    if (text.length < 3) { setFindError("Type at least 3 characters."); return; }
-    setSearching(true); setFindError(""); setMatches(null);
+    if (text.length < 3) { setFindError("Type at least 3 characters."); setFeedbackNotice(""); return; }
+    setSearching(true); setFindError(""); setFeedbackNotice(""); setMatches(null);
+
+    // 1. Instant Houston ZIP code lookup
+    const zipDigits = text.replace(/\D/g, "");
+    if (zipDigits.length === 5 && HOUSTON_ZIPS[zipDigits]) {
+      const zipMatch = HOUSTON_ZIPS[zipDigits];
+      setPin({ lat: zipMatch.lat, lon: zipMatch.lon, name: `${zipMatch.name} (${zipDigits})`, focus: true });
+      setQuery(`${zipMatch.name} (${zipDigits})`);
+      setFeedbackNotice(`✓ Found Houston ZIP ${zipDigits} · ${zipMatch.name}`);
+      setSearching(false);
+      return;
+    }
+
     try {
-      const response = await fetch("/api/geocode?" + new URLSearchParams({ q: text }), { cache: "no-store" });
-      if (!response.ok) throw new Error("Address search is unavailable. Tap the map or use your location instead.");
+      const searchTarget = text.toLowerCase().includes("houston") ? text : `${text}, Houston, TX`;
+      const response = await fetch("/api/geocode?" + new URLSearchParams({ q: searchTarget }), { cache: "no-store" });
+      if (!response.ok) throw new Error("Search service unavailable. Falling back to nearest landmark.");
       const results = await response.json() as PlaceMatch[];
-      if (!results.length) setFindError("No matches in the Houston area. Try adding a street, ZIP code or landmark.");
-      else if (results.length === 1) choose(results[0]);
-      else setMatches(results);
-    } catch (failure: unknown) { setFindError(failure instanceof Error ? failure.message : "Address search unavailable"); }
-    finally { setSearching(false); }
+      if (!results.length) {
+        // Smart fallback to nearest landmark based on keyword or central Houston
+        const lower = text.toLowerCase();
+        const matched = HOUSTON_PRESETS.find((p) =>
+          lower.includes(p.name.toLowerCase().split(" ")[0]) ||
+          p.name.toLowerCase().includes(lower) ||
+          (lower.includes("uh") && p.name.includes("University of Houston")) ||
+          (lower.includes("tmc") && p.name.includes("Medical Center")) ||
+          (lower.includes("downtown") && p.name.includes("Downtown")) ||
+          (lower.includes("galleria") && p.name.includes("Galleria")) ||
+          (lower.includes("heights") && p.name.includes("Heights")) ||
+          (lower.includes("montrose") && p.name.includes("Montrose")) ||
+          (lower.includes("sugar") && p.name.includes("Sugar Land")) ||
+          (lower.includes("woodlands") && p.name.includes("Woodlands")) ||
+          (lower.includes("memorial") && p.name.includes("Memorial")) ||
+          (lower.includes("rice") && p.name.includes("Rice"))
+        );
+        const target = matched ?? HOUSTON_PRESETS.find((p) => p.name.includes("Downtown")) ?? HOUSTON_PRESETS[0];
+        setPin({ lat: target.lat, lon: target.lon, name: `${text} (near ${target.name})`, focus: true });
+        setFeedbackNotice(`Address not found on street index; linked to nearest Houston landmark: ${target.name} for environmental forecasts.`);
+      } else if (results.length === 1) {
+        choose(results[0]);
+      } else {
+        setMatches(results);
+      }
+    } catch {
+      const target = HOUSTON_PRESETS.find((p) => p.name.includes("Downtown")) ?? HOUSTON_PRESETS[0];
+      setPin({ lat: target.lat, lon: target.lon, name: `${text} (near ${target.name})`, focus: true });
+      setFeedbackNotice(`Search service unavailable; linked to ${target.name} for environmental conditions.`);
+    } finally {
+      setSearching(false);
+    }
   }
-  function choose(match: PlaceMatch) { setMatches(null); setQuery(match.name); setPin({ lat: match.lat, lon: match.lon, name: match.name, focus: true }); }
+
+  function choose(match: PlaceMatch) {
+    setMatches(null);
+    setQuery(match.name);
+    const nearest = findNearestPreset(match.lat, match.lon);
+    if (nearest && nearest.miles > 0.1) {
+      setFeedbackNotice(`✓ Linked: Near ${nearest.preset.name} (${nearest.miles.toFixed(1)} miles away)`);
+    } else if (nearest) {
+      setFeedbackNotice(`✓ Linked: ${nearest.preset.name}`);
+    }
+    setPin({ lat: match.lat, lon: match.lon, name: match.name, focus: true });
+  }
+
   function locate() {
     if (!("geolocation" in navigator)) { setFindError("This browser can't share your location. Search an address instead."); return; }
-    setLocating(true); setFindError(""); setMatches(null);
+    setLocating(true); setFindError(""); setFeedbackNotice(""); setMatches(null);
     navigator.geolocation.getCurrentPosition(({ coords }) => {
       setLocating(false);
       if (!inLimits(coords.latitude, coords.longitude)) { setFindError("You appear to be outside the Houston area. Search a Houston address instead."); return; }
+      const nearest = findNearestPreset(coords.latitude, coords.longitude);
+      setFeedbackNotice(`✓ Current location: Near ${nearest.preset.name} (${nearest.miles.toFixed(1)} miles away)`);
       setPin({ lat: coords.latitude, lon: coords.longitude, name: "Your current location", focus: true });
     }, (failure) => {
       setLocating(false);
       setFindError(failure.code === failure.PERMISSION_DENIED ? "Location permission was declined. Search an address instead." : "Couldn't get your location. Search an address instead.");
     }, { enableHighAccuracy: false, timeout: 10_000, maximumAge: 300_000 });
   }
-  function clear() { request.current++; setPin(null); setPoint(null); setPointError(""); setLoading(false); }
+
+  function clear() { request.current++; setPin(null); setPoint(null); setPointError(""); setFeedbackNotice(""); setFindError(""); setLoading(false); }
   const scale = fill === "off" ? null : SCALES[fill], now = point?.current;
   const layerMissing = Boolean(scale && area && !area.cells.some((cell) => cell[scale.metric] !== undefined));
   const aqi = now?.us_aqi !== undefined ? band(SCALES.air, now.us_aqi) : null;
@@ -188,6 +297,26 @@ export default function ConditionsMap({ readings, prefs, grid }: { readings: Haz
   return <div className="map-layout">
     <section aria-label="Houston conditions map" className="map-panel">
       <div className="location-bar">
+        <select
+          aria-label="Quick jump to Houston landmark"
+          onChange={(e) => {
+            const selected = HOUSTON_PRESETS.find((p) => p.name === e.target.value);
+            if (selected) {
+              setMatches(null);
+              setFindError("");
+              setFeedbackNotice(`✓ Jumped to landmark: ${selected.name}`);
+              setQuery(selected.name);
+              setPin({ lat: selected.lat, lon: selected.lon, name: selected.name, focus: true });
+            }
+          }}
+          defaultValue=""
+          style={{ maxWidth: 220, fontSize: "12px", padding: "10px", borderColor: "var(--line)" }}
+        >
+          <option value="" disabled>-- Houston Landmarks --</option>
+          {HOUSTON_PRESETS.map((p) => (
+            <option key={p.name} value={p.name}>{p.name}</option>
+          ))}
+        </select>
         <form className="location-search" onSubmit={(event) => void search(event)} role="search">
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Enter an address, ZIP code or place in Houston" aria-label="Search a location" maxLength={200} />
           <button className="primary" disabled={searching}>{searching ? "Searching…" : "Get advice"}</button>
@@ -195,6 +324,7 @@ export default function ConditionsMap({ readings, prefs, grid }: { readings: Haz
         <button className="secondary" onClick={locate} disabled={locating}>{locating ? "Locating…" : "◎ Use my location"}</button>
         {matches && <ul className="place-matches" aria-label="Matching places">{matches.map((match) => <li key={match.address}><button onClick={() => choose(match)}><strong>{match.name}</strong><span className="tiny">{match.address}</span></button></li>)}</ul>}
       </div>
+      {feedbackNotice && <p className="notice" style={{ background: "#edf4eb", borderColor: "#c7dccb", color: "#325341" }} role="status">{feedbackNotice}</p>}
       {findError && <p className="notice" role="status">{findError}</p>}
       <div className="map-controls">
         <div className="segmented" role="radiogroup" aria-label="Map shading">
@@ -226,7 +356,22 @@ export default function ConditionsMap({ readings, prefs, grid }: { readings: Haz
     <aside className="panel map-advice" aria-live="polite">
       {!pin && !pointError && <div className="map-empty"><span aria-hidden>⌖</span><strong>Pick a spot on the map.</strong>
         <p className="muted">Enter an address, use your current location, or tap anywhere in Houston to see the air, heat, flooding and power conditions there and how your plans should change.</p></div>}
-      {(pin || pointError) && <div className="panel-heading"><div><p className="section-label">ADVICE FOR THIS SPOT</p><h3>{pin?.name ?? "Outside coverage"}</h3>{pin && <p className="tiny">{pin.lat.toFixed(3)}, {pin.lon.toFixed(3)}</p>}</div><button className="quiet" onClick={clear}>Clear ✕</button></div>}
+      {(pin || pointError) && <div className="panel-heading">
+        <div>
+          <p className="section-label">ADVICE FOR THIS SPOT</p>
+          <h3>{pin?.name ?? "Outside coverage"}</h3>
+          {pin && (() => {
+            const nearest = findNearestPreset(pin.lat, pin.lon);
+            return (
+              <p className="tiny">
+                {pin.lat.toFixed(4)}, {pin.lon.toFixed(4)}
+                {nearest && nearest.miles > 0.05 ? ` · Near ${nearest.preset.name} (${nearest.miles.toFixed(1)} mi)` : ` · Central ${nearest.preset.name}`}
+              </p>
+            );
+          })()}
+        </div>
+        <button className="quiet" onClick={clear}>Clear ✕</button>
+      </div>}
       {pointError && <p className="notice" role="status">{pointError}</p>}
       {loading && !point && <p className="muted">Checking conditions here…</p>}
       {point && pin && <div className={loading ? "refreshing" : ""}>

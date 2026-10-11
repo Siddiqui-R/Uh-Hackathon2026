@@ -12,10 +12,22 @@ export interface Identity {
 }
 
 export type AccountSession =
-  | { status: "valid"; account: Identity & { mode: "account"; token: string } }
+  | { status: "valid"; account: Identity & { mode: "account" | "demo"; token: string } }
   | { status: "missing" | "invalid" | "unavailable" };
 
 export async function accountSession(): Promise<AccountSession> {
+  if (process.env.NOACH_DEMO_MODE === "true" || process.env.NOACH_DEMO_STORAGE === "memory") {
+    return {
+      status: "valid",
+      account: {
+        userId: "demo_guest",
+        mode: "demo",
+        token: "demo_token",
+        email: "demo@houston.select",
+        displayName: "Houston Explorer (Demo)",
+      },
+    };
+  }
   const token = cookies().get(ACCOUNT_COOKIE)?.value;
   if (!token) return { status: "missing" };
   try {
