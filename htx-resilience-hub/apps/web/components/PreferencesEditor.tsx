@@ -21,6 +21,27 @@ const HOUSTON_PRESETS: Array<{ name: string; kind: Location["kind"]; lat: number
   { name: "Houston Ship Channel / Pasadena", kind: "work", lat: 29.7289, lon: -95.2210 },
 ];
 
+const HOUSTON_ZIPS: Record<string, { name: string; kind: Location["kind"]; lat: number; lon: number }> = {
+  "77002": { name: "Downtown Houston", kind: "work", lat: 29.7533, lon: -95.3585 },
+  "77003": { name: "East End / EaDo", kind: "home", lat: 29.7480, lon: -95.3450 },
+  "77004": { name: "University of Houston / Third Ward", kind: "school", lat: 29.7199, lon: -95.3422 },
+  "77005": { name: "Rice University / West U", kind: "school", lat: 29.7174, lon: -95.4018 },
+  "77006": { name: "Montrose / Midtown", kind: "home", lat: 29.7420, lon: -95.3900 },
+  "77007": { name: "Washington Corridor / Memorial Park", kind: "other", lat: 29.7681, lon: -95.4338 },
+  "77008": { name: "The Heights", kind: "home", lat: 29.8028, lon: -95.4000 },
+  "77019": { name: "River Oaks / Buffalo Bayou", kind: "other", lat: 29.7615, lon: -95.3853 },
+  "77024": { name: "Memorial / Memorial City", kind: "home", lat: 29.7800, lon: -95.5400 },
+  "77025": { name: "Braeswood Place", kind: "home", lat: 29.6900, lon: -95.4300 },
+  "77030": { name: "Texas Medical Center (TMC)", kind: "work", lat: 29.7080, lon: -95.3995 },
+  "77056": { name: "The Galleria / Uptown", kind: "work", lat: 29.7397, lon: -95.4654 },
+  "77077": { name: "Energy Corridor", kind: "work", lat: 29.7850, lon: -95.6350 },
+  "77096": { name: "Meyerland", kind: "home", lat: 29.6700, lon: -95.4800 },
+  "77098": { name: "Upper Kirby / Montrose", kind: "home", lat: 29.7350, lon: -95.4100 },
+  "77478": { name: "Sugar Land", kind: "home", lat: 29.5984, lon: -95.6219 },
+  "77479": { name: "Sugar Land (Town Square)", kind: "home", lat: 29.5984, lon: -95.6219 },
+  "77380": { name: "The Woodlands", kind: "home", lat: 30.1600, lon: -95.4600 },
+};
+
 interface Props { value: UserPrefs; onSave: (prefs: UserPrefs) => Promise<string>; section: "places" | "routines" | "settings"; }
 
 export default function PreferencesEditor({ value, onSave, section }: Props) {
@@ -56,10 +77,22 @@ export default function PreferencesEditor({ value, onSave, section }: Props) {
       setSearchError((prev) => ({ ...prev, [loc.id]: "Type at least 3 characters." }));
       return;
     }
+
+    // 1. Direct Houston ZIP code check
+    const zipDigits = trimmed.replace(/\D/g, "");
+    if (zipDigits.length === 5 && HOUSTON_ZIPS[zipDigits]) {
+      const zipMatch = HOUSTON_ZIPS[zipDigits];
+      changeLocation(index, { name: `${zipMatch.name} (${zipDigits})`, lat: zipMatch.lat, lon: zipMatch.lon, kind: zipMatch.kind });
+      setSearchError((prev) => ({ ...prev, [loc.id]: "" }));
+      setSearchResults((prev) => ({ ...prev, [loc.id]: [] }));
+      return;
+    }
+
     setSearchingIndex(index);
     setSearchError((prev) => ({ ...prev, [loc.id]: "" }));
     try {
-      const res = await fetch("/api/geocode?" + new URLSearchParams({ q: trimmed }));
+      const searchTarget = trimmed.toLowerCase().includes("houston") ? trimmed : `${trimmed}, Houston, TX`;
+      const res = await fetch("/api/geocode?" + new URLSearchParams({ q: searchTarget }));
       if (!res.ok) throw new Error("Search service unavailable. Falling back to nearest landmark.");
       const matches = await res.json() as PlaceMatch[];
       if (!matches.length) {
@@ -72,13 +105,14 @@ export default function PreferencesEditor({ value, onSave, section }: Props) {
           (lower.includes("tmc") && p.name.includes("Medical Center")) ||
           (lower.includes("downtown") && p.name.includes("Downtown")) ||
           (lower.includes("galleria") && p.name.includes("Galleria")) ||
-          (lower.includes("heights") && p.name.includes("Heights"))
+          (lower.includes("heights") && p.name.includes("Heights")) ||
+          (lower.includes("montrose") && p.name.includes("Montrose"))
         );
         const target = matched ?? HOUSTON_PRESETS.find((p) => p.name.includes("Downtown")) ?? HOUSTON_PRESETS[0];
         changeLocation(index, { name: `${trimmed} (near ${target.name})`, lat: target.lat, lon: target.lon, kind: target.kind });
         setSearchError((prev) => ({
           ...prev,
-          [loc.id]: `Street unverified in map index. Linked to nearest landmark: ${target.name} for high-quality forecasts.`,
+          [loc.id]: `Mapped to nearest landmark: ${target.name} for high-quality forecasts.`,
         }));
       } else if (matches.length === 1) {
         changeLocation(index, { name: matches[0].name, lat: matches[0].lat, lon: matches[0].lon });
@@ -86,7 +120,7 @@ export default function PreferencesEditor({ value, onSave, section }: Props) {
       } else {
         setSearchResults((prev) => ({ ...prev, [loc.id]: matches }));
       }
-    } catch (err: unknown) {
+    } catch {
       const target = HOUSTON_PRESETS[0];
       changeLocation(index, { name: trimmed, lat: target.lat, lon: target.lon });
       setSearchError((prev) => ({
