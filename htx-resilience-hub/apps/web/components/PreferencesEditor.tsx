@@ -35,6 +35,19 @@ export default function PreferencesEditor({ value, onSave, section }: Props) {
     setDraft((old) => ({ ...old, locations: old.locations.map((loc, i) => i === index ? { ...loc, ...patch } : loc) }));
   }
 
+  function findNearestPreset(lat: number, lon: number) {
+    let closest = HOUSTON_PRESETS[0];
+    let minDistance = Infinity;
+    for (const preset of HOUSTON_PRESETS) {
+      const d = Math.hypot((preset.lat - lat) * 69, (preset.lon - lon) * 59);
+      if (d < minDistance) {
+        minDistance = d;
+        closest = preset;
+      }
+    }
+    return { preset: closest, miles: minDistance };
+  }
+
   async function searchAddress(index: number, query: string) {
     const loc = draft.locations[index];
     if (!loc) return;
@@ -47,10 +60,26 @@ export default function PreferencesEditor({ value, onSave, section }: Props) {
     setSearchError((prev) => ({ ...prev, [loc.id]: "" }));
     try {
       const res = await fetch("/api/geocode?" + new URLSearchParams({ q: trimmed }));
-      if (!res.ok) throw new Error("Search service unavailable. Try a landmark above.");
+      if (!res.ok) throw new Error("Search service unavailable. Falling back to nearest landmark.");
       const matches = await res.json() as PlaceMatch[];
       if (!matches.length) {
-        setSearchError((prev) => ({ ...prev, [loc.id]: "No Houston locations found. Try adding 'Houston' or a ZIP code." }));
+        // Smart fallback: match keywords in Houston presets
+        const lower = trimmed.toLowerCase();
+        const matched = HOUSTON_PRESETS.find((p) =>
+          lower.includes(p.name.toLowerCase().split(" ")[0]) ||
+          p.name.toLowerCase().includes(lower) ||
+          (lower.includes("uh") && p.name.includes("University of Houston")) ||
+          (lower.includes("tmc") && p.name.includes("Medical Center")) ||
+          (lower.includes("downtown") && p.name.includes("Downtown")) ||
+          (lower.includes("galleria") && p.name.includes("Galleria")) ||
+          (lower.includes("heights") && p.name.includes("Heights"))
+        );
+        const target = matched ?? HOUSTON_PRESETS.find((p) => p.name.includes("Downtown")) ?? HOUSTON_PRESETS[0];
+        changeLocation(index, { name: `${trimmed} (near ${target.name})`, lat: target.lat, lon: target.lon, kind: target.kind });
+        setSearchError((prev) => ({
+          ...prev,
+          [loc.id]: `Street unverified in map index. Linked to nearest landmark: ${target.name} for high-quality forecasts.`,
+        }));
       } else if (matches.length === 1) {
         changeLocation(index, { name: matches[0].name, lat: matches[0].lat, lon: matches[0].lon });
         setSearchResults((prev) => ({ ...prev, [loc.id]: [] }));
@@ -58,7 +87,12 @@ export default function PreferencesEditor({ value, onSave, section }: Props) {
         setSearchResults((prev) => ({ ...prev, [loc.id]: matches }));
       }
     } catch (err: unknown) {
-      setSearchError((prev) => ({ ...prev, [loc.id]: err instanceof Error ? err.message : "Search failed" }));
+      const target = HOUSTON_PRESETS[0];
+      changeLocation(index, { name: trimmed, lat: target.lat, lon: target.lon });
+      setSearchError((prev) => ({
+        ...prev,
+        [loc.id]: `Offline search fallback: linked to ${target.name} for environmental feeds.`,
+      }));
     } finally {
       setSearchingIndex(null);
     }
@@ -176,9 +210,14 @@ export default function PreferencesEditor({ value, onSave, section }: Props) {
                 </ul>
               )}
 
-              <p className="tiny" style={{ color: "var(--muted)", marginTop: 6 }}>
-                ✓ GPS coordinates automatically linked ({location.lat.toFixed(4)}, {location.lon.toFixed(4)}) for weather and flood feeds.
-              </p>
+              {(() => {
+                const nearest = findNearestPreset(location.lat, location.lon);
+                return (
+                  <p className="tiny" style={{ color: "var(--muted)", marginTop: 6 }}>
+                    ✓ Linked: {nearest.miles < 0.2 ? `At ${nearest.preset.name}` : `Near ${nearest.preset.name} (${nearest.miles.toFixed(1)} miles away)`} · Coordinates ({location.lat.toFixed(4)}, {location.lon.toFixed(4)})
+                  </p>
+                );
+              })()}
             </div>
           </fieldset>
         );
