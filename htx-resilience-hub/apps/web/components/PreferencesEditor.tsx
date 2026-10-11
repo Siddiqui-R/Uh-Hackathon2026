@@ -1,17 +1,19 @@
 "use client";
 import { useEffect, useState } from "react";
 import type { UserPrefs, Location } from "@/lib/types";
-interface Props { value: UserPrefs; onSave: (prefs: UserPrefs) => Promise<string>; }
-export default function PreferencesEditor({ value, onSave }: Props) {
+interface Props { value: UserPrefs; onSave: (prefs: UserPrefs) => Promise<string>; section: "places" | "routines" | "settings"; }
+export default function PreferencesEditor({ value, onSave, section }: Props) {
   const [draft, setDraft] = useState(value), [message, setMessage] = useState(""), [busy, setBusy] = useState(false);
   useEffect(() => { setDraft(value); }, [value]);
   function changeLocation(index: number, patch: Partial<Location>) {
     setDraft((old) => ({ ...old, locations: old.locations.map((loc, i) => i === index ? { ...loc, ...patch } : loc) }));
   }
-  return <details className="panel preferences">
-    <summary><span><span className="section-label">MAKE IT YOURS</span><strong>Your places & routines</strong></span><span className="tag">Edit preferences +</span></summary>
+  return <section className="panel preferences">
+    <div className="section-heading"><div><span className="section-label">MAKE IT YOURS</span><h2>{section === "places" ? "Your places" : section === "routines" ? "Your routines" : "Your preferences"}</h2></div></div>
     <form onSubmit={(event) => { event.preventDefault(); setBusy(true); void onSave(draft).then(setMessage).catch((error: unknown) => setMessage(error instanceof Error ? error.message : "Save failed")).finally(() => setBusy(false)); }}>
-      <p className="muted">Choose locations and plans you want the assistant to consider. Coordinates are sent to weather providers for local forecasts.</p>
+      {section === "places" && <>
+      <p className="muted">Save up to five Houston places for local forecasts and nearby alerts. Coordinates are sent to weather providers.</p>
+      {!draft.locations.length && <p className="empty-events">No saved places yet. Add one to personalize conditions and routines.</p>}
       {draft.locations.map((location, index) => <fieldset key={location.id} className="editor-row">
         <legend>Location {index + 1}</legend>
         <label>Name<input required maxLength={80} value={location.name} onChange={(event) => changeLocation(index, { name: event.target.value })} /></label>
@@ -21,6 +23,11 @@ export default function PreferencesEditor({ value, onSave }: Props) {
         <button type="button" className="quiet" onClick={() => setDraft((old) => ({ ...old, locations: old.locations.filter((loc) => loc.id !== location.id), routines: old.routines.filter((r) => r.location_id !== location.id) }))}>Remove</button>
       </fieldset>)}
       <button type="button" className="secondary" disabled={draft.locations.length >= 5} onClick={() => setDraft((old) => ({ ...old, locations: [...old.locations, { id: crypto.randomUUID(), name: "New location", kind: "other", lat: 29.7199, lon: -95.3422 }] }))}>+ Add a place</button>
+      </>}
+      {section === "routines" && <>
+      <p className="muted">Routines use your saved places and local schedule to find useful forecast windows.</p>
+      {!draft.locations.length && <p className="notice">Add a place first, then return here to create a routine.</p>}
+      {!draft.routines.length && <p className="empty-events">No routines saved yet.</p>}
       {draft.routines.map((routine, index) => <fieldset key={routine.id} className="routine-row">
         <legend>Routine {index + 1}</legend>
         <div className="editor-row">
@@ -34,14 +41,20 @@ export default function PreferencesEditor({ value, onSave }: Props) {
         </label>)}</div>
       </fieldset>)}
       <button type="button" className="secondary" disabled={!draft.locations.length || draft.routines.length >= 10} onClick={() => setDraft((old) => ({ ...old, routines: [...old.routines, { id: crypto.randomUUID(), activity: "Outdoor exercise", location_id: old.locations[0].id, local_time: "17:00", weekdays: [0,1,2,3,4,5,6] }] }))}>+ Add a routine</button>
+      </>}
+      {section === "settings" && <>
+      <p className="muted">Choose how your plan is evaluated and which updates reach this browser.</p>
       <div className="editor-row">
         <label>Timezone<input required value={draft.timezone} onChange={(event) => setDraft((old) => ({ ...old, timezone: event.target.value }))} /></label>
         <label>Feels-like alert (°F)<input type="number" min={0} max={500} value={draft.thresholds.feels_like_f ?? 95} onChange={(event) => setDraft((old) => ({ ...old, thresholds: { ...old.thresholds, feels_like_f: Number(event.target.value) } }))} /></label>
         <label>US AQI alert above<input type="number" min={0} max={500} value={draft.thresholds.us_aqi ?? 100} onChange={(event) => setDraft((old) => ({ ...old, thresholds: { ...old.thresholds, us_aqi: Number(event.target.value) } }))} /></label>
       </div>
+      <label className="consent"><input type="checkbox" checked={draft.notifications_enabled ?? false} onChange={(event) => setDraft((old) => ({ ...old, notifications_enabled: event.target.checked }))} />Show browser notifications while the app is open</label>
+      <label className="consent"><input type="checkbox" checked={draft.voice_enabled ?? false} onChange={(event) => setDraft((old) => ({ ...old, voice_enabled: event.target.checked }))} />Play voice briefings for new alerts</label>
       <label className="consent"><input type="checkbox" checked={draft.memory_enabled} onChange={(event) => setDraft((old) => ({ ...old, memory_enabled: event.target.checked }))} />Remember these saved preferences with Backboard and use them in Gemini answers.</label>
-      <p className="tiny">Gemini receives saved preferences and environmental context when you ask. Turning off memory stops future Backboard use; it does not delete already stored provider memory. This demo uses a private browser session, not an account login.</p>
+      <p className="tiny">Gemini receives saved preferences and environmental context when you ask. Turning off memory stops future Backboard use; it does not delete already stored provider memory.</p>
+      </>}
       <button className="primary" disabled={busy}>{busy ? "Saving…" : "Save my preferences"}</button><p role="status" className="tiny">{message}</p>
     </form>
-  </details>;
+  </section>;
 }

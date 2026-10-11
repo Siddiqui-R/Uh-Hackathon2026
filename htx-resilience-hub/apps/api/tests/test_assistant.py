@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
-from apps.api.models import UserPrefs, Location, Routine
+from apps.api.models import AskRequest, UserPrefs, Location, Routine
 from apps.api.environment import public_hazards, fresh, forecast, CACHE, location_key
 from apps.api.recommendations import hour_for, next_activity, build_recommendations
 from apps.api.conditions import grid_severity, lattice, point, geocode, GEOCODES, area
@@ -183,12 +183,16 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         async_client = FakeAsyncClient()
         with patch.dict(os.environ,{"GEMINI_API_KEY":"test-only","GEMINI_MODEL":"gemini-flash-latest"}), \
              patch("google.genai.Client",return_value=SimpleNamespace(aio=async_client)):
-            answer,provider=await gemini_answer("Basketball near UH?",{"source_status":{"air":"live model"}},"Saved UH")
+            answer,provider=await gemini_answer(
+                "What about tomorrow?",{"source_status":{"air":"live model"}},"Saved UH",
+                history=[{"question":"Basketball near UH?","answer":"Check the forecast."}],
+            )
         self.assertEqual(provider,"gemini")
         self.assertEqual(answer,"Use the cooler forecast hour.")
         self.assertTrue(async_client.closed)
         request=json.loads(async_client.models.generate_content.await_args.kwargs["contents"])
-        self.assertEqual(request["question"],"Basketball near UH?")
+        self.assertEqual(request["question"],"What about tomorrow?")
+        self.assertEqual(request["recent_exchanges"],[{"question":"Basketball near UH?","answer":"Check the forecast."}])
         self.assertEqual(request["context"]["source_status"]["air"],"live model")
         self.assertEqual(request["saved_memory"],"Saved UH")
 
@@ -239,6 +243,11 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         conditions.CACHE.pop("area",None)
 
 class RouteTests(unittest.TestCase):
+    def test_ask_history_is_bounded(self) -> None:
+        turns = [{"question":"Earlier question","answer":"Earlier answer"}] * 5
+        with self.assertRaises(ValidationError):
+            AskRequest(question="Follow-up",history=turns)
+
     def test_internal_api_rejects_missing_token(self) -> None:
         with patch.dict(os.environ,{"INTERNAL_API_TOKEN":"test-only","DATABASE_URL":"mock"}):
             with TestClient(app) as client:
@@ -248,14 +257,15 @@ class RouteTests(unittest.TestCase):
     def test_hazard_contract_and_ask(self) -> None:
         row={"hazard":"flood","station_id":"08074500","station_name":"Whiteoak","lat":29.7752,"lon":-95.3972,
              "metric":"Gage height, feet","value":7.71,"unit":"ft","severity":"unrated","time":NOW.isoformat()}
-        with patch.dict(os.environ,{"INTERNAL_API_TOKEN":"","DATABASE_URL":"mock"}), patch("apps.api.main.hazards",new=AsyncMock(return_value=([row],"live"))), patch("apps.api.main.briefing",new=AsyncMock(return_value={})), patch("apps.api.main.get_prefs",new=AsyncMock(return_value=(prefs(),"database"))), patch("apps.api.main.memory_get",new=AsyncMock(return_value="")), patch("apps.api.main.gemini_answer",new=AsyncMock(return_value=("Grounded answer","gemini"))):
+        with patch.dict(os.environ,{"INTERNAL_API_TOKEN":"","DATABASE_URL":"mock"}), patch("apps.api.main.hazards",new=AsyncMock(return_value=([row],"live"))), patch("apps.api.main.briefing",new=AsyncMock(return_value={})), patch("apps.api.main.get_prefs",new=AsyncMock(return_value=(prefs(),"database"))), patch("apps.api.main.memory_get",new=AsyncMock(return_value="")), patch("apps.api.main.gemini_answer",new=AsyncMock(return_value=("Grounded answer","gemini"))) as generate:
             with TestClient(app) as client:
                 response=client.get("/api/hazards")
                 self.assertEqual(response.headers["X-Data-Mode"],"live")
                 self.assertEqual(set(response.json()[0]),set(row))
-                response=client.post("/api/ask",json={"question":"Basketball?","user_id":"alice"})
+                response=client.post("/api/ask",json={"question":"What about tomorrow?","user_id":"alice","history":[{"question":"Basketball?","answer":"Check the forecast."}]})
                 self.assertEqual(response.json(),{"answer":"Grounded answer"})
                 self.assertEqual(response.headers["X-AI-Provider"],"gemini")
+                self.assertEqual(generate.await_args.kwargs["history"],[{"question":"Basketball?","answer":"Check the forecast."}])
 
     def test_point_route_rejects_outside_houston(self) -> None:
         with patch.dict(os.environ,{"INTERNAL_API_TOKEN":"","DATABASE_URL":"mock"}):

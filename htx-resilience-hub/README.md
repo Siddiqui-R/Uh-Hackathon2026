@@ -20,6 +20,10 @@ python -m venv .venv
 
 Open http://localhost:3000. The supervisor runs the frontend, API and workers. On Linux/macOS use .venv/bin/python instead. Separate terminals can run `npm run dev`, `uvicorn apps.api.main:app --reload`, and `python -m apps.api.workers`. Windows without reload should use `python -m apps.api.run` for psycopg's compatible event loop. Restart after changing configuration.
 
+Migration `006_accounts.sql` adds first-party accounts, revocable sessions, password reset tokens and assistant conversation history. Run `python -m apps.api.migrate` before signing up. Account signup requires a reachable database even when the anonymous demo is enabled. Sign up at `/signup`, sign in at `/login`, and log out from the header or Settings. Existing anonymous browser data remains in its demo profile; creating an account starts a separate empty profile. It is not automatically copied to the account.
+
+Passwords use salted PBKDF2-HMAC-SHA256 hashes. Account sessions are opaque, database-backed tokens kept in secure HttpOnly cookies in production; only a SHA-256 hash of each token is stored. Reset links expire after 30 minutes, can be used once, and revoke existing sessions. Configure `APP_BASE_URL`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM`, and optionally `SMTP_USERNAME`/`SMTP_PASSWORD` for reset email. SMTP uses STARTTLS. For local development without SMTP, set `NOACH_DEV_RESET_LINKS=true` with `NOACH_ENV=development` to show a reset link in the browser. Never enable that flag in production. These variables belong on the server, never in `NEXT_PUBLIC_*` settings.
+
 When Docker or a database is unavailable, run `python tools/demo_local.py` after installing dependencies, then open http://localhost:3001. This explicit rehearsal runs the API and web frontend without workers or durable storage. It can fetch real Open-Meteo modeled forecasts; the bayou fallback, simulated PM2.5 events, nearby alerts and saved preferences are labeled demo or temporary. Everything in process memory resets when the API restarts. Set `NOACH_DEMO_STORAGE=memory` only for this development path; remove it when `DATABASE_URL` is ready, then run migrations and the normal supervisor. This temporary mode does not verify Tiger Data, worker persistence or Vultr deployment.
 
 For a local Timescale database: `docker compose up -d db`. The development Compose stack overrides DATABASE_URL to its local database; never use that stack for Tiger Cloud production. A fresh local volume applies all migration files. Existing databases use the migration runner, which tracks applied filenames under an advisory lock.
@@ -44,9 +48,11 @@ After each USGS ingestion, the worker also examines fresh gage-height readings i
 
 ## Interfaces and privacy
 
-All browser API calls go through Next.js. Signed HttpOnly session cookies assign each browser an anonymous profile; callers cannot select another user's ID through the web proxy. Direct backend access requires an internal token in production. This is an anonymous hackathon prototype, not multi-device account login: each browser has separate preferences. Keep the backend private and configure provider quotas.
+All browser API calls go through Next.js. Signed HttpOnly cookies assign anonymous demo profiles; account users have a separate secure HttpOnly cookie backed by a database session. The web proxy derives the user ID from that session, and the backend checks that account requests target the signed-in owner. Direct backend access requires a private internal token in production. Keep the backend private and configure provider quotas.
 
-GET /api/hazards preserves the agreed flat array contract. USGS gage heights are shown as unrated observations because flood stages are specific to each station; no universal height threshold triggers an alert. Earlier fixed-height alerts remain in the database for audit but are excluded from dashboard replay. Fresh rapid-rise anomalies can still create clearly labeled nearby alerts. POST /api/ask keeps {question,user_id} → {answer}. Briefing, prefs, status, history, demo-alert and speech routes support the assistant.
+The navigation now has separate Dashboard, Places, Routines, Recommendations, Live Monitor, Ask the Assistant, and Settings pages. Saved places, routines, thresholds, alerts and assistant conversations use the account's ID. Browser demo profiles remain available without signup; their data is local to that browser's session, and a database-free rehearsal remains temporary. Account conversation history persists in Tiger Data and loads on the Assistant page. Settings includes display name, thresholds, memory and in-browser notification/voice preferences. Browser notifications still require device permission and an open page.
+
+GET /api/hazards preserves the agreed flat array contract. USGS gage heights are shown as unrated observations because flood stages are specific to each station; no universal height threshold triggers an alert. Earlier fixed-height alerts remain in the database for audit but are excluded from dashboard replay. Fresh rapid-rise anomalies can still create clearly labeled nearby alerts. POST /api/ask keeps a `{question,user_id,history?}` → `{answer}` response, with the user ID supplied by the web proxy. Account history is loaded server-side and cannot be replaced by a client-supplied history. Briefing, prefs, status, history, demo-alert and speech routes support the assistant.
 
 Saving places sends coordinates to Open-Meteo for conditions. Optional Backboard memory synchronizes explicitly saved preferences to a separate assistant per user; failures fall back to Tiger preferences. Gemini receives relevant environmental context and preferences for answers. Voice sends displayed text to ElevenLabs only after audio opt-in. Browser notifications work while the page remains running; closed-browser push is deferred.
 
@@ -86,6 +92,7 @@ npx vercel deploy --prod --yes --scope rabeet1 --cwd ../.deployment/noach-web
 
 Set backend production variables `DATABASE_URL`, `INTERNAL_API_TOKEN`, `NOACH_ENV=production`,
 `NOACH_DEMO_MODE=false`, `HOSTING_PROVIDER=Vercel`, and the optional provider keys/models.
+For password reset, also set `APP_BASE_URL=https://noach.select` and the server-only SMTP variables above.
 Set frontend `API_BASE_URL=https://noach-api.vercel.app`, the same `INTERNAL_API_TOKEN`,
 `NOACH_ENV=production`, and optional ElevenLabs settings. Apply migrations before deployment
 with `python -m apps.api.migrate` using the production database connection.
@@ -110,7 +117,7 @@ python -m unittest discover -s apps/api/tests -v
 python -m compileall -q apps/api
 ```
 
-Tests cover threshold boundaries, local forecast alignment, missing/stale data, persistence fallback isolation, deduplication and internal API protection. For one-shot real flood ingestion, export DATABASE_URL and run `python apps/api/ingest/flood.py`; repeated unchanged readings should write zero rows. Scheduling is handled by the worker service, or externally:
+Tests cover threshold boundaries, local forecast alignment, missing/stale data, persistence fallback isolation, account creation/login/session rules, user data isolation, deduplication and internal API protection. For one-shot real flood ingestion, export DATABASE_URL and run `python apps/api/ingest/flood.py`; repeated unchanged readings should write zero rows. Scheduling is handled by the worker service, or externally:
 
 ```cron
 */15 * * * * /usr/bin/python3 /path/to/flood.py

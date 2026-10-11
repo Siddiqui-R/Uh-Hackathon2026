@@ -1,14 +1,18 @@
 import "server-only";
 import { backendUrl, proxyError } from "./backend";
-import { sessionId, rateLimited } from "./session";
+import { rateLimited } from "./session";
+import { identity } from "./account";
 
 export async function proxy(request: Request, path: string, personal = true): Promise<Response> {
-  const id = sessionId();
+  const viewer = await identity();
+  if (!viewer) return Response.json({ error: "Your sign-in has expired. Sign in again." }, { status: 401 });
+  const id = viewer.userId;
   const url = new URL(backendUrl(path));
   const incoming = new URL(request.url);
   incoming.searchParams.forEach((value, key) => { if (key !== "user_id") url.searchParams.set(key, value); });
   if (personal) url.searchParams.set("user_id", id);
   const headers: Record<string, string> = { "Content-Type": "application/json", "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "" };
+  if (viewer.token) headers["x-account-session"] = viewer.token;
   let body: string | undefined;
   if (request.method === "POST") {
     const origin = request.headers.get("origin");

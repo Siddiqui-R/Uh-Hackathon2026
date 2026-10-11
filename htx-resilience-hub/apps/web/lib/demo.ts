@@ -1,6 +1,6 @@
 import type { Briefing, UserPrefs } from "./types";
 export const initialPreferences: UserPrefs = {
-  user_id: "", timezone: "America/Chicago", memory_enabled: false,
+  user_id: "", timezone: "America/Chicago", memory_enabled: false, notifications_enabled: false, voice_enabled: false,
   locations: [{ id: "uh", name: "University of Houston", kind: "school", lat: 29.7199, lon: -95.3422 }],
   routines: [{ id: "basketball", activity: "Play basketball", location_id: "uh", local_time: "17:00", weekdays: [0,1,2,3,4,5,6] }],
   thresholds: { feels_like_f: 95, us_aqi: 100 },

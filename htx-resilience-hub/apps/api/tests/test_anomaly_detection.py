@@ -141,6 +141,21 @@ class AnomalyDetectionTests(unittest.TestCase):
             finally:
                 DEMO_PREFS.clear(); DEMO_ALERTS.clear(); DEMO_ALERT_KEYS.clear(); DEMO_ANOMALIES.clear()
 
+    def test_browser_simulation_alerts_only_requesting_profile(self) -> None:
+        place = Location(id="uh", name="UH", kind="school", lat=29.7199, lon=-95.3422)
+        finding = Finding(baseline=11.0, sample_count=8, score=4.0, method="PM2.5", severity="watch")
+        with patch.dict("os.environ", {"NOACH_DEMO_MODE":"true", "NOACH_DEMO_STORAGE":"memory", "NOACH_ENV":"development"}):
+            DEMO_PREFS.clear(); DEMO_ALERTS.clear(); DEMO_ALERT_KEYS.clear(); DEMO_ANOMALIES.clear()
+            try:
+                DEMO_PREFS["alice"] = UserPrefs(user_id="alice", locations=[place])
+                DEMO_PREFS["bob"] = UserPrefs(user_id="bob", locations=[place])
+                asyncio.run(publish_anomaly("demo:uh", "UH demo monitor", place.lat, place.lon,
+                    NOW, 52.0, finding, "Synthetic demonstration", simulated=True, target_user_id="alice"))
+                self.assertEqual(len(asyncio.run(alerts_after("alice", 0))), 1)
+                self.assertEqual(asyncio.run(alerts_after("bob", 0)), [])
+            finally:
+                DEMO_PREFS.clear(); DEMO_ALERTS.clear(); DEMO_ALERT_KEYS.clear(); DEMO_ANOMALIES.clear()
+
 
 class AirIngestionTests(unittest.IsolatedAsyncioTestCase):
     async def test_first_poll_backfills_history_and_publishes_only_fresh_spike(self) -> None:

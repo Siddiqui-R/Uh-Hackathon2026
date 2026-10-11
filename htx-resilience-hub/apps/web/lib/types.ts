@@ -9,6 +9,7 @@ export interface Routine { id: string; activity: string; location_id: string; lo
 export interface UserPrefs {
   user_id: string; locations: Location[]; routines: Routine[]; timezone: string;
   thresholds: Record<string, number>; memory_enabled: boolean;
+  notifications_enabled: boolean; voice_enabled: boolean;
 }
 export interface Suggestion { title: string; description: string; source_url: string; }
 export interface ActivityConditions {

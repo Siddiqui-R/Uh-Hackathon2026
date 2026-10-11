@@ -37,7 +37,7 @@ async def latest_anomalies(limit: int = 20) -> list[dict[str, Any]]:
 async def publish_anomaly(station_id: str, station_name: str, lat: float, lon: float,
                           observed_at: datetime, value: float, finding: Finding, source: str,
                           simulated: bool, *, hazard: str = "air", metric: str = "PM2.5",
-                          unit: str = "µg/m³") -> dict[str, Any] | None:
+                          unit: str = "µg/m³", target_user_id: str | None = None) -> dict[str, Any] | None:
     if temporary_storage() and simulated:
         event = {"id": len(DEMO_ANOMALIES) + 1, "station_id": station_id, "station_name": station_name,
                  "lat": lat, "lon": lon, "hazard": hazard, "metric": metric, "value": value,
@@ -47,7 +47,7 @@ async def publish_anomaly(station_id: str, station_name: str, lat: float, lon: f
                  "detected_at": datetime.now(timezone.utc).isoformat(), "source": source,
                  "is_simulated": True}
         DEMO_ANOMALIES.append(event)
-        await notify_nearby(event)
+        await notify_nearby(event, target_user_id)
         return event.copy()
     async with connection() as conn:
         row = await (await conn.execute("""INSERT INTO environmental_anomalies
@@ -61,11 +61,11 @@ async def publish_anomaly(station_id: str, station_name: str, lat: float, lon: f
     if not row:
         return None
     event = serialize(row)
-    await notify_nearby(event)
+    await notify_nearby(event, target_user_id)
     return event
 
 
-async def notify_nearby(event: dict[str, Any]) -> None:
+async def notify_nearby(event: dict[str, Any], target_user_id: str | None = None) -> None:
     station = {"lat": event["lat"], "lon": event["lon"]}
     if temporary_storage():
         rows = [{"preferences": prefs.model_dump(mode="json")} for prefs in DEMO_PREFS.values()]
@@ -76,6 +76,10 @@ async def notify_nearby(event: dict[str, Any]) -> None:
         try:
             profile = UserPrefs.model_validate(row["preferences"])
         except ValueError:
+            continue
+        if target_user_id and profile.user_id != target_user_id:
+            continue
+        if event["is_simulated"] and profile.user_id.startswith("acct:") and target_user_id != profile.user_id:
             continue
         nearby = next((place for place in profile.locations if distance(place, station) <= 10), None)
         if not nearby:

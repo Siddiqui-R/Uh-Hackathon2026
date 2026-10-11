@@ -18,20 +18,23 @@ def temporary_storage() -> bool:
     return demo_mode() and os.getenv("NOACH_ENV") != "production" and os.getenv("NOACH_DEMO_STORAGE") == "memory"
 
 async def get_prefs(user_id: str) -> tuple[UserPrefs, str]:
-    if temporary_storage():
+    if temporary_storage() and not user_id.startswith("acct:"):
         return DEMO_PREFS.get(user_id, UserPrefs(user_id=user_id)), "temporary memory"
     try:
         async with connection() as conn:
             cursor = await conn.execute("SELECT preferences FROM user_prefs WHERE user_id=%s", (user_id,))
             row = await cursor.fetchone()
-            return (UserPrefs.model_validate(row["preferences"]) if row and row["preferences"] else UserPrefs(user_id=user_id)), "database"
+            prefs = UserPrefs.model_validate(row["preferences"]) if row and row["preferences"] else UserPrefs(user_id=user_id)
+            if prefs.user_id != user_id:
+                raise ValueError("Stored preference owner mismatch")
+            return prefs, "database"
     except Exception:
-        if not demo_mode():
+        if not demo_mode() or user_id.startswith("acct:"):
             raise
         return DEMO_PREFS.get(user_id, UserPrefs(user_id=user_id)), "demo (temporary)"
 
 async def save_prefs(prefs: UserPrefs) -> str:
-    if temporary_storage():
+    if temporary_storage() and not prefs.user_id.startswith("acct:"):
         DEMO_PREFS[prefs.user_id] = prefs.model_copy(deep=True)
         return "temporary memory"
     try:
@@ -44,7 +47,7 @@ async def save_prefs(prefs: UserPrefs) -> str:
                  Jsonb(prefs.thresholds), Jsonb(prefs.model_dump(mode="json"))))
         return "database"
     except Exception:
-        if not demo_mode():
+        if not demo_mode() or prefs.user_id.startswith("acct:"):
             raise
         DEMO_PREFS[prefs.user_id] = prefs.model_copy(deep=True)
         return "demo (temporary)"
@@ -58,7 +61,7 @@ async def job_update(job: str, status: str, rows: int = 0) -> None:
           (job, status, rows, status))
 
 async def persist_alert(key: str, payload: dict[str, Any]) -> bool:
-    if temporary_storage():
+    if temporary_storage() and not payload["user_id"].startswith("acct:"):
         if key in DEMO_ALERT_KEYS:
             return False
         DEMO_ALERT_KEYS.add(key)
@@ -81,7 +84,7 @@ async def persist_alert(key: str, payload: dict[str, Any]) -> bool:
         return True
 
 async def alerts_after(user_id: str, cursor_id: int) -> list[dict[str, Any]]:
-    if temporary_storage():
+    if temporary_storage() and not user_id.startswith("acct:"):
         return [a for a in DEMO_ALERTS if a["user_id"] == user_id and int(a["id"]) > cursor_id]
     try:
         async with connection() as conn:
@@ -93,13 +96,13 @@ async def alerts_after(user_id: str, cursor_id: int) -> list[dict[str, Any]]:
             return [{**row["payload"], "read_at":row["read_at"].isoformat() if row["read_at"] else None}
                     for row in await cursor.fetchall()]
     except Exception:
-        if not demo_mode():
+        if not demo_mode() or user_id.startswith("acct:"):
             raise
         return [a for a in DEMO_ALERTS if a["user_id"] == user_id and int(a["id"]) > cursor_id]
 
 
 async def set_alert_read(user_id: str, alert_id: int, read: bool) -> tuple[bool, str | None]:
-    if temporary_storage():
+    if temporary_storage() and not user_id.startswith("acct:"):
         for alert in DEMO_ALERTS:
             if alert["user_id"] == user_id and int(alert["id"]) == alert_id:
                 alert["read_at"] = (alert.get("read_at") or datetime.now(timezone.utc).isoformat()) if read else None
@@ -113,3 +116,21 @@ async def set_alert_read(user_id: str, alert_id: int, read: bool) -> tuple[bool,
     if not row:
         return False, None
     return True, row["read_at"].isoformat() if row["read_at"] else None
+
+
+async def conversation_history(user_id: str, limit: int = 20, before_id: int | None = None) -> list[dict[str, Any]]:
+    if not user_id.startswith("acct:"):
+        return []
+    async with connection() as conn:
+        rows = await (await conn.execute("""SELECT id,question,answer,provider,created_at FROM conversation_turns
+            WHERE user_id=%s AND (%s IS NULL OR id<%s) ORDER BY id DESC LIMIT %s""",
+            (user_id, before_id, before_id, min(limit, 20)))).fetchall()
+    return [{**row, "created_at": row["created_at"].isoformat()} for row in reversed(rows)]
+
+
+async def save_conversation_turn(user_id: str, question: str, answer: str, provider: str) -> None:
+    if not user_id.startswith("acct:"):
+        return
+    async with connection() as conn:
+        await conn.execute("""INSERT INTO conversation_turns(user_id,question,answer,provider)
+            VALUES (%s,%s,%s,%s)""", (user_id, question, answer, provider))

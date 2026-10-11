@@ -1,6 +1,6 @@
 import { proxy } from "@/lib/proxy";
 export const dynamic = "force-dynamic";
-const allowed = new Set(["briefing", "prefs", "status", "hazards/history", "air/stations", "anomalies", "alerts/demo", "conditions/area", "conditions/point", "geocode"]);
+const allowed = new Set(["briefing", "prefs", "status", "hazards/history", "air/stations", "anomalies", "alerts/demo", "conditions/area", "conditions/point", "geocode", "assistant/history"]);
 const shared = new Set(["status", "hazards/history", "conditions/area", "geocode"]);
 export async function GET(request: Request, { params }: { params: { path: string[] } }): Promise<Response> {
   const path = params.path.join("/");

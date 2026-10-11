@@ -52,6 +52,8 @@ class UserPrefs(BaseModel):
     timezone: str = "America/Chicago"
     thresholds: dict[str, float] = Field(default_factory=lambda: {"feels_like_f": 95, "us_aqi": 100})
     memory_enabled: bool = False
+    notifications_enabled: bool = False
+    voice_enabled: bool = False
     @model_validator(mode="after")
     def validate_preferences(self) -> "UserPrefs":
         try:
@@ -93,9 +95,14 @@ class AlertReadRequest(BaseModel):
     alert_id: int = Field(gt=0)
     read: bool
 
+class ConversationTurn(BaseModel):
+    question: str = Field(min_length=1, max_length=4000)
+    answer: str = Field(min_length=1, max_length=3000)
+
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
     user_id: str | None = Field(default=None, max_length=100)
+    history: list[ConversationTurn] = Field(default_factory=list, max_length=4)
 
 class AskResponse(BaseModel):
     answer: str

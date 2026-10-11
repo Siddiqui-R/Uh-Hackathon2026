@@ -19,13 +19,14 @@ if not __package__:
     from pathlib import Path
     sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 from apps.api.config import require_env
+from apps.api.auth import router as auth_router, session_user, account_user_id
 from apps.api.db import connection
 from apps.api.models import AskRequest, AskResponse, UserPrefs, HazardReading, AlertReadRequest
 from apps.api.environment import hazards
 from apps.api.conditions import area, geocode, point, in_limits
 from apps.api.providers import gemini_answer, memory_get, memory_sync
 from apps.api.service import briefing
-from apps.api.store import get_prefs, save_prefs, alerts_after, persist_alert, set_alert_read, demo_mode, temporary_storage, DEMO_ALERTS
+from apps.api.store import get_prefs, save_prefs, alerts_after, persist_alert, set_alert_read, conversation_history, save_conversation_turn, demo_mode, temporary_storage, DEMO_ALERTS
 from apps.api.recommendations import suggestions
 from apps.api.anomaly_detection import detect_pm25, detect_rising_water
 from apps.api.anomaly_store import anomalies_after, latest_anomalies, publish_anomaly
@@ -39,12 +40,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
 app = FastAPI(title="Noach Select",version="0.3.0",lifespan=lifespan)
+app.include_router(auth_router)
 
 @app.middleware("http")
 async def internal_access(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     token = os.getenv("INTERNAL_API_TOKEN","")
+    if not token and (os.getenv("NOACH_ENV") == "production" or os.getenv("VERCEL")) and request.url.path != "/health":
+        return JSONResponse({"detail":"Internal API token is not configured"},status_code=503)
     if token and request.url.path != "/health" and not hmac.compare_digest(request.headers.get("x-internal-token",""),token):
         return JSONResponse({"detail":"Internal API access required"},status_code=401)
+    account_token = request.headers.get("x-account-session", "")
+    if account_token:
+        try:
+            request.state.account = await session_user(account_token)
+        except Exception:
+            return JSONResponse({"detail":"Account session unavailable"},status_code=503)
+        if not request.state.account:
+            return JSONResponse({"detail":"Sign in again"},status_code=401)
     return await call_next(request)
 
 @app.get("/health")
@@ -111,12 +123,14 @@ async def anomaly_stream(request: Request, after: int = Query(default=0,ge=0)) -
 
 class SimulationRequest(BaseModel):
     kind: Literal["air", "flood"] = "air"
+    user_id: str | None = None
 
 
 @app.post("/api/demo/simulate-anomaly")
-async def simulate_anomaly(request: SimulationRequest | None = None) -> dict:
+async def simulate_anomaly(http_request: Request, request: SimulationRequest | None = None) -> dict:
     if not demo_mode() and os.getenv("NOACH_ALLOW_SIMULATION", "false").lower() != "true":
         raise HTTPException(404,"Not found")
+    target_user_id = account_user_id(http_request,request.user_id) if request and request.user_id else None
     kind = request.kind if request else "air"
     now = datetime.now(timezone.utc)
     if kind == "flood":
@@ -137,7 +151,8 @@ async def simulate_anomaly(request: SimulationRequest | None = None) -> dict:
         station_id,station_name,lat,lon,value,hazard,metric,unit = station
         event = await publish_anomaly(station_id, station_name, lat, lon,
                                       now, value, finding, "Synthetic demonstration", simulated=True,
-                                      hazard=hazard, metric=metric, unit=unit)
+                                      hazard=hazard, metric=metric, unit=unit,
+                                      target_user_id=target_user_id)
     except Exception:
         raise HTTPException(503,"Simulation requires the database and anomaly migration")
     return {"status":"detected", "event":event}
@@ -153,7 +168,8 @@ async def geocode_route(q: str = Query(min_length=3,max_length=200)) -> list[dic
         raise HTTPException(503,"Address search is unavailable; tap the map or use your device location instead")
 
 @app.get("/api/conditions/point")
-async def conditions_point(user_id: str = Query(min_length=1,max_length=100), lat: float = Query(), lon: float = Query()) -> dict:
+async def conditions_point(request: Request, user_id: str = Query(min_length=1,max_length=100), lat: float = Query(), lon: float = Query()) -> dict:
+    user_id = account_user_id(request,user_id)
     if not in_limits(lat,lon):
         raise HTTPException(422,"Map pins are limited to the greater Houston area")
     try:
@@ -163,7 +179,8 @@ async def conditions_point(user_id: str = Query(min_length=1,max_length=100), la
         raise HTTPException(503,"Conditions for this point are unavailable; please retry")
 
 @app.get("/api/prefs")
-async def preferences(user_id: str = Query(min_length=1,max_length=100)) -> dict:
+async def preferences(request: Request, user_id: str = Query(min_length=1,max_length=100)) -> dict:
+    user_id = account_user_id(request,user_id)
     try:
         prefs,storage = await get_prefs(user_id)
         return {"preferences":prefs.model_dump(mode="json"),"storage":storage}
@@ -171,7 +188,8 @@ async def preferences(user_id: str = Query(min_length=1,max_length=100)) -> dict
         raise HTTPException(503,"Preferences unavailable; check database configuration and migrations")
 
 @app.post("/api/prefs")
-async def preferences_save(prefs: UserPrefs) -> dict:
+async def preferences_save(request: Request, prefs: UserPrefs) -> dict:
+    account_user_id(request,prefs.user_id)
     try:
         storage = await save_prefs(prefs)
     except Exception:
@@ -180,7 +198,8 @@ async def preferences_save(prefs: UserPrefs) -> dict:
     return {"preferences":prefs.model_dump(mode="json"),"storage":storage,"memory":memory}
 
 @app.get("/api/briefing")
-async def briefing_route(user_id: str = Query(min_length=1,max_length=100)) -> dict:
+async def briefing_route(request: Request, user_id: str = Query(min_length=1,max_length=100)) -> dict:
+    user_id = account_user_id(request,user_id)
     try:
         if os.getenv("VERCEL"):
             from apps.api.serverless import maintain
@@ -190,19 +209,36 @@ async def briefing_route(user_id: str = Query(min_length=1,max_length=100)) -> d
         raise HTTPException(503,"Briefing unavailable; check database settings or explicitly enable NOACH_DEMO_MODE")
 
 @app.post("/api/ask",response_model=AskResponse)
-async def ask(payload: AskRequest, response: Response) -> AskResponse:
+async def ask(payload: AskRequest, response: Response, request: Request) -> AskResponse:
+    user_id = account_user_id(request,payload.user_id or "guest")
     try:
-        context = await briefing(payload.user_id or "guest")
-        prefs,_ = await get_prefs(payload.user_id or "guest")
+        context = await briefing(user_id)
+        prefs,_ = await get_prefs(user_id)
         context["saved_preferences"] = prefs.model_dump(mode="json",exclude={"user_id"})
-        answer,provider = await gemini_answer(payload.question,context,await memory_get(prefs))
+        history = await conversation_history(user_id,4) if user_id.startswith("acct:") else [turn.model_dump() for turn in payload.history]
+        answer,provider = await gemini_answer(
+            payload.question,context,await memory_get(prefs),
+            history=[{"question":turn["question"],"answer":turn["answer"]} for turn in history],
+        )
+        await save_conversation_turn(user_id,payload.question,answer,provider)
         response.headers["X-AI-Provider"] = provider
         return AskResponse(answer=answer)
     except Exception:
         raise HTTPException(503,"Environmental context unavailable; please retry")
 
+
+@app.get("/api/assistant/history")
+async def assistant_history(request: Request, user_id: str = Query(min_length=1,max_length=100), before: int | None = Query(default=None,gt=0)) -> list[dict]:
+    user_id = account_user_id(request,user_id)
+    try:
+        return await conversation_history(user_id,before_id=before)
+    except Exception:
+        raise HTTPException(503,"Conversation history unavailable")
+
 @app.get("/api/alerts")
 async def alert_stream(request: Request,user_id: str = Query(min_length=1,max_length=100),after: int = Query(default=0,ge=0)) -> StreamingResponse:
+    user_id = account_user_id(request,user_id)
+    account_token = request.headers.get("x-account-session", "")
     try:
         cursor_id = max(after,int(request.headers.get("last-event-id","0")))
     except ValueError:
@@ -212,6 +248,12 @@ async def alert_stream(request: Request,user_id: str = Query(min_length=1,max_le
         started = time.monotonic()
         yield 'event: ready\ndata: {"status":"connected"}\n\n'
         while not await request.is_disconnected():
+            if account_token:
+                try:
+                    if not await session_user(account_token):
+                        break
+                except Exception:
+                    break
             if os.getenv("VERCEL") and time.monotonic() - started >= 240:
                 break  # EventSource reconnects with Last-Event-ID.
             try:
@@ -226,7 +268,8 @@ async def alert_stream(request: Request,user_id: str = Query(min_length=1,max_le
 
 
 @app.post("/api/alerts/read")
-async def alert_read(payload: AlertReadRequest) -> dict:
+async def alert_read(request: Request, payload: AlertReadRequest) -> dict:
+    account_user_id(request,payload.user_id)
     try:
         found, read_at = await set_alert_read(payload.user_id, payload.alert_id, payload.read)
     except Exception:
@@ -236,10 +279,10 @@ async def alert_read(payload: AlertReadRequest) -> dict:
     return {"id": str(payload.alert_id), "read_at": read_at}
 
 @app.post("/api/alerts/demo")
-async def demo_alert(payload: AskRequest) -> dict:
+async def demo_alert(request: Request, payload: AskRequest) -> dict:
     if not demo_mode() and os.getenv("NOACH_ALLOW_SIMULATION", "false").lower() != "true":
         raise HTTPException(404,"Not found")
-    user_id = payload.user_id or "guest"
+    user_id = account_user_id(request,payload.user_id or "guest")
     alert = {"id":"0","time":datetime.now(timezone.utc).isoformat(),"user_id":user_id,"hazard":"heat","severity":"watch",
       "message":"DEMO: A simulated feels-like forecast crossed your exercise threshold. Consider an indoor or cooler-hour activity.",
       "channel":"dashboard","location_id":"uh","station_id":None,"suggestions":suggestions("heat"),"demo":True}
