@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 import httpx
 from .environment import distance, forecast, hazards
+from .forecast_quality import temperature_f, quality_notes
 from .models import Location, UserPrefs
 from .recommendations import build_recommendations, hour_for
 
@@ -31,7 +32,7 @@ def cached(key: str, ttl: timedelta, now: datetime) -> dict[str, Any] | None:
     hit = CACHE.get(key)
     return hit[1] if hit and now-hit[0] < ttl else None
 
-async def fetch_layer(client: httpx.AsyncClient, source: str, params: dict[str, str], count: int) -> list[dict[str, float]]:
+async def fetch_layer(client: httpx.AsyncClient, source: str, params: dict[str, str], count: int) -> list[dict[str, Any]]:
     url,names,extra = LAYERS[source]
     for attempt in range(2):  # Open-Meteo occasionally times out or rate-limits a burst; one retry covers it.
         try:
@@ -41,7 +42,30 @@ async def fetch_layer(client: httpx.AsyncClient, source: str, params: dict[str, 
             rows = payload if isinstance(payload,list) else [payload]
             if len(rows) != count:
                 raise ValueError("Lattice size mismatch")
-            return [{name:float(value) for name in names if isinstance(value := row["current"].get(name),(int,float)) and math.isfinite(value)} for row in rows]
+            values = []
+            for row in rows:
+                current, units = row["current"], row.get("current_units", {})
+                entry: dict[str, Any] = {}
+                timestamp = current.get("time")
+                if timestamp:
+                    stamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                    stamp = stamp.replace(tzinfo=UTC) if stamp.tzinfo is None else stamp.astimezone(UTC)
+                    entry["valid_at"] = {source: stamp.isoformat()}
+                for name in names:
+                    value = current.get(name)
+                    if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value):
+                        continue
+                    if name == "apparent_temperature":
+                        normalized = temperature_f(value, units.get(name))
+                        entry["source_values"] = {name:{"value":value,"unit":units.get(name)}}
+                        if normalized is None:
+                            entry["data_quality_notes"] = [f"Open-Meteo feels-like raw value {value:g}; unit {units.get(name) or 'not supplied'}. Fahrenheit could not be verified."]
+                            continue
+                        entry[name] = normalized
+                    else:
+                        entry[name] = float(value)
+                values.append(entry)
+            return values
         except Exception:
             if attempt:
                 raise
@@ -63,8 +87,11 @@ async def area() -> dict[str, Any]:
             statuses[source] = "unavailable"
             continue
         for cell,values in zip(cells,result):
+            cell.setdefault("valid_at", {}).update(values.pop("valid_at", {}))
             cell.update(values)
         statuses[source] = "live model"
+    for cell in cells:
+        cell["data_quality_notes"] = quality_notes(cell,cell["lat"],cell["lon"])
     result = {"generated_at":now.isoformat(),"bounds":BOUNDS,
       "cell":{"dlat":(BOUNDS["north"]-BOUNDS["south"])/STEPS,"dlon":(BOUNDS["east"]-BOUNDS["west"])/STEPS},
       "cells":cells,"source_status":statuses,
@@ -116,6 +143,7 @@ async def point(prefs: UserPrefs, lat: float, lon: float) -> dict[str, Any]:
     now = datetime.now(UTC)
     gauges = sorted((r for r in flood if "gage height" in r["metric"].lower()),key=lambda r:distance(pin,r))[:3]
     return {"generated_at":now.isoformat(),"timezone":prefs.timezone,"location":pin.model_dump(),
+      "forecast_retrieved_at":snapshot["retrieved_at"],"forecast_attribution":snapshot.get("attribution"),
       "current":hour_for(snapshot["hours"],now.replace(minute=0,second=0,microsecond=0)) or {},
       "nearby_gauges":[{**g,"distance_km":round(distance(pin,g),1)} for g in gauges],"grid":grid,
       "recommendations":build_recommendations(scoped,[snapshot],flood,now,grid),

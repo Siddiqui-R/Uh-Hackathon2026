@@ -10,7 +10,7 @@ const titles: Record<Flow, string> = {
 export default function AuthForm({ flow, token = "", nextPath = "/", sessionWarning }: { flow: Flow; token?: string; nextPath?: string; sessionWarning?: string }) {
   const [email, setEmail] = useState(""), [password, setPassword] = useState(""), [name, setName] = useState("");
   const [busy, setBusy] = useState(false), [message, setMessage] = useState(""), [resetLink, setResetLink] = useState("");
-  const [signupState, setSignupState] = useState<"form" | "onboarding" | "ready">("form");
+  const [signupState, setSignupState] = useState<"form" | "onboarding" | "ready" | "signin-needed">("form");
   const [activitySaved, setActivitySaved] = useState(false);
   const background = useRef<HTMLDivElement>(null);
   const readyAction = useRef<HTMLAnchorElement>(null);
@@ -26,6 +26,13 @@ export default function AuthForm({ flow, token = "", nextPath = "/", sessionWarn
       const result = await response.json() as { error?: string; message?: string; dev_reset_url?: string };
       if (!response.ok) throw new Error(result.error ?? "Please try again.");
       if (flow === "signup") {
+        let accountReady = false;
+        try {
+          const sessionResponse = await fetch("/api/session", { cache: "no-store" });
+          const session = sessionResponse.ok ? await sessionResponse.json() as { mode?: string } : null;
+          accountReady = session?.mode === "account";
+        } catch { /* Signup succeeded, but session verification did not. */ }
+        if (!accountReady) { setSignupState("signin-needed"); return; }
         setSignupState("onboarding");
         return;
       }
@@ -35,9 +42,10 @@ export default function AuthForm({ flow, token = "", nextPath = "/", sessionWarn
     } catch (error: unknown) { setMessage(error instanceof Error ? error.message : "Please try again."); }
     finally { setBusy(false); }
   }
-  return <div className="app-shell auth-shell"><div ref={background}><header className="site-header"><a className="wordmark" href="/"><span className="brand-icon">✳</span> Noach</a><a className="secondary" href={signupState !== "form" ? destination : flow === "signup" ? `/login${nextQuery}` : `/signup${nextQuery}`}>{signupState !== "form" ? "Go to Noach" : flow === "signup" ? "Sign in" : "Create account"}</a></header>
-    <main className="auth-layout"><section className="panel auth-card"><p className="section-label">YOUR HOUSTON PLAN</p><h1>{signupState === "form" ? titles[flow] : "Your account is ready"}</h1>
-      {signupState !== "form" ? <div role="status"><p>{activitySaved ? "Your activity is saved to your new account." : "Your account is ready. Set up an activity whenever you like."}</p>
+  return <div className="app-shell auth-shell"><div ref={background}><header className="site-header"><a className="wordmark" href="/"><span className="brand-icon">✳</span> Noach</a><a className="secondary" href={signupState === "signin-needed" ? `/login${nextQuery}` : signupState !== "form" ? destination : flow === "signup" ? `/login${nextQuery}` : `/signup${nextQuery}`}>{signupState === "signin-needed" ? "Sign in" : signupState !== "form" ? "Go to Noach" : flow === "signup" ? "Sign in" : "Create account"}</a></header>
+    <main className="auth-layout"><section className="panel auth-card"><p className="section-label">YOUR HOUSTON PLAN</p><h1>{signupState === "form" ? titles[flow] : signupState === "signin-needed" ? "Your account was created" : "Your account is ready"}</h1>
+      {signupState === "signin-needed" ? <div role="alert"><p>We couldn’t verify your new sign-in. Your account was created; sign in to continue.</p><a className="primary" href={`/login${nextQuery}`}>Sign in ↗</a></div>
+        : signupState !== "form" ? <div role="status"><p>{activitySaved ? "Your activity is saved to your new account." : "Your account is ready. Set up an activity whenever you like."}</p>
         <div className="auth-links"><a ref={readyAction} className="primary" href={activitySaved ? "/recommendations" : destination}>{activitySaved ? "View your recommendation ↗" : "Continue to Noach ↗"}</a>
           <a href="/routines">{activitySaved ? "Manage activities" : "Plan an activity later"}</a></div></div> : <>
       {sessionWarning && <p className="notice" role="status">{sessionWarning}</p>}

@@ -131,20 +131,20 @@ export default function PreferencesEditor({ value, onSave, section }: Props) {
       setSearchingIndex(null);
     }
   }
-  return <section className="panel preferences">
-    <div className="section-heading"><div><span className="section-label">MAKE IT YOURS</span><h2>{section === "places" ? "Your places" : section === "routines" ? "Your routines" : "Your preferences"}</h2></div></div>
+  return <section className={`panel preferences${section === "places" ? " place-book" : ""}`}>
+    <div className="section-heading"><div><span className="section-label">{section === "places" ? "PLACE BOOK" : "MAKE IT YOURS"}</span><h2>{section === "places" ? "Your places" : section === "routines" ? "Your routines" : "Your preferences"}</h2></div></div>
     <form onSubmit={(event) => { event.preventDefault(); setBusy(true); void onSave(draft).then(setMessage).catch((error: unknown) => setMessage(error instanceof Error ? error.message : "Save failed")).finally(() => setBusy(false)); }}>
       {section === "places" && <>
-      <p className="muted">Save up to five Houston places for local forecasts and nearby alerts. Select a Houston landmark or search any address—coordinates are automatically found for you.</p>
-      {!draft.locations.length && <p className="empty-events">No saved places yet. Add one to personalize conditions and routines.</p>}
+      <p className="muted">Save up to 5 places. Each activity uses a saved place.</p>
+      {!draft.locations.length && <p className="empty-events">Add your first place, then plan an activity there.</p>}
       {draft.locations.map((location, index) => {
         const matchingPreset = HOUSTON_PRESETS.find((p) => p.name === location.name);
         return (
           <fieldset key={location.id} className="editor-row" style={{ border: "1px solid var(--line)", borderRadius: 8, padding: 14, marginBottom: 16 }}>
-            <legend style={{ fontWeight: 600 }}>Place {index + 1}: {location.name}</legend>
+            <legend style={{ fontWeight: 600 }}><span className="place-index">0{index + 1}</span> {location.name}</legend>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", width: "100%", alignItems: "flex-end" }}>
               <label style={{ flex: 2, minWidth: 200 }}>
-                Houston Landmark / Preset
+                Houston landmark
                 <select
                   value={matchingPreset ? matchingPreset.name : "custom"}
                   onChange={(e) => {
@@ -154,7 +154,7 @@ export default function PreferencesEditor({ value, onSave, section }: Props) {
                     }
                   }}
                 >
-                  <option value="custom">-- Search an address / custom place --</option>
+                  <option value="custom">Custom place / address search</option>
                   {HOUSTON_PRESETS.map((p) => (
                     <option key={p.name} value={p.name}>{p.name}</option>
                   ))}
@@ -162,7 +162,7 @@ export default function PreferencesEditor({ value, onSave, section }: Props) {
               </label>
 
               <label style={{ flex: 2, minWidth: 180 }}>
-                Display Name / Label
+                Place name
                 <input
                   required
                   maxLength={80}
@@ -192,11 +192,12 @@ export default function PreferencesEditor({ value, onSave, section }: Props) {
             </div>
 
             {/* Address Search & Autocomplete */}
-            <div style={{ marginTop: 10, width: "100%" }}>
+            <details className="place-search"><summary>Find an address or ZIP code</summary>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <input
                   type="text"
-                  placeholder="Or type an address, street, or ZIP in Houston (e.g. 4800 Calhoun Rd or 77004)..."
+                  aria-label={`Address or ZIP for ${location.name}`}
+                  placeholder="Houston address or ZIP"
                   style={{ flex: 1, fontSize: 12 }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
@@ -248,11 +249,12 @@ export default function PreferencesEditor({ value, onSave, section }: Props) {
                 const nearest = findNearestPreset(location.lat, location.lon);
                 return (
                   <p className="tiny" style={{ color: "var(--muted)", marginTop: 6 }}>
-                    ✓ Linked: {nearest.miles < 0.2 ? `At ${nearest.preset.name}` : `Near ${nearest.preset.name} (${nearest.miles.toFixed(1)} miles away)`} · Coordinates ({location.lat.toFixed(4)}, {location.lon.toFixed(4)})
+                    Location: {nearest.miles < 0.2 ? `At ${nearest.preset.name}` : `Near ${nearest.preset.name} (${nearest.miles.toFixed(1)} miles away)`} · Coordinates ({location.lat.toFixed(4)}, {location.lon.toFixed(4)})
                   </p>
                 );
               })()}
-            </div>
+            </details>
+            {value.locations.some((saved) => saved.id === location.id) && <div className="place-plan-links"><span className="tiny">{value.routines.filter((activity) => activity.location_id === location.id).length} {value.routines.filter((activity) => activity.location_id === location.id).length === 1 ? "planned activity" : "planned activities"}</span><a href={`/routines?place=${encodeURIComponent(location.id)}`}>Plan here ↗</a></div>}
           </fieldset>
         );
       })}
@@ -291,7 +293,7 @@ export default function PreferencesEditor({ value, onSave, section }: Props) {
       <label className="consent"><input type="checkbox" checked={draft.memory_enabled} onChange={(event) => setDraft((old) => ({ ...old, memory_enabled: event.target.checked }))} />Remember these saved preferences with Backboard and use them in Gemini answers.</label>
       <p className="tiny">Gemini receives saved preferences and environmental context when you ask. Turning off memory stops future Backboard use; it does not delete already stored provider memory.</p>
       </>}
-      <button className="primary" disabled={busy}>{busy ? "Saving…" : "Save my preferences"}</button><p role="status" className="tiny">{message}</p>
+      <button className="primary" disabled={busy}>{busy ? "Saving…" : section === "places" ? "Save places" : "Save my preferences"}</button><p role="status" className="tiny">{message}</p>{section === "places" && value.locations.length > 0 && <div className="planning-next"><span>Next / choose when to go</span><a href="/routines">Plan an activity →</a></div>}
     </form>
   </section>;
 }
