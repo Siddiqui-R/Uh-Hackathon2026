@@ -1,99 +1,222 @@
 "use client";
 import { useEffect, useState } from "react";
 import type { Routine, UserPrefs } from "@/lib/types";
-import PreferencesEditor from "@/components/PreferencesEditor";
 import FeatureFrame from "./FeatureFrame";
 import styles from "./features.module.css";
 
-type PlannedRoutine = Routine & { start_date?: string | null; duration_minutes?: number; recurrence?: "none" | "weekly"; alerts_enabled?: boolean };
-const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+type PlannedRoutine = Routine & {
+  start_date?: string | null;
+  duration_minutes?: number;
+  recurrence?: "none" | "weekly";
+  alerts_enabled?: boolean;
+};
+const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const durations = [30, 60, 90, 120, 180, 240];
+
 function todayIn(zone: string): string {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
-  const piece = (name: string) => parts.find((p) => p.type === name)?.value ?? "";
+  const piece = (name: string) => parts.find((part) => part.type === name)?.value ?? "";
   return `${piece("year")}-${piece("month")}-${piece("day")}`;
 }
-function displayDate(date: string | null | undefined): string { return date || "Start on the next selected weekday"; }
-export default function ActivityPlanner() {
-  const [prefs, setPrefs] = useState<UserPrefs | null>(null), [draft, setDraft] = useState<PlannedRoutine[]>([]);
-  const [loading, setLoading] = useState(true), [saving, setSaving] = useState(false), [schemaReady, setSchemaReady] = useState(false), [error, setError] = useState(""), [message, setMessage] = useState("");
+function timeIn(zone: string): string {
+  return new Intl.DateTimeFormat("en-GB", { timeZone: zone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date());
+}
+function newActivity(prefs: UserPrefs): PlannedRoutine {
+  let startDate = todayIn(prefs.timezone);
+  if (timeIn(prefs.timezone) >= "17:00") {
+    const tomorrow = new Date(`${startDate}T12:00:00Z`);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    startDate = tomorrow.toISOString().slice(0, 10);
+  }
+  const weekday = (new Date(`${startDate}T12:00:00Z`).getUTCDay() + 6) % 7;
+  return { id: crypto.randomUUID(), activity: "", location_id: prefs.locations[0]?.id ?? "",
+    start_date: startDate, local_time: "17:00", duration_minutes: 60,
+    recurrence: "none", weekdays: [weekday], alerts_enabled: true };
+}
+function dateLabel(value: string | null | undefined): string {
+  if (!value) return "the next selected day";
+  return new Date(`${value}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+function timeLabel(value: string): string {
+  const [hour, minute] = value.split(":").map(Number);
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return value;
+  return `${hour % 12 || 12}${minute ? `:${String(minute).padStart(2, "0")}` : ""} ${hour < 12 ? "AM" : "PM"}`;
+}
+function summary(routine: PlannedRoutine, prefs: UserPrefs): string {
+  const place = prefs.locations.find((item) => item.id === routine.location_id)?.name ?? "a saved place";
+  const schedule = routine.recurrence === "none"
+    ? `on ${dateLabel(routine.start_date)}`
+    : `every ${routine.weekdays.map((day) => days[day]).join(", ") || "selected day"}${routine.start_date ? `, starting ${dateLabel(routine.start_date)}` : ""}`;
+  return `${routine.activity.trim() || "Your activity"} at ${place}, ${schedule} at ${timeLabel(routine.local_time)}, for ${routine.duration_minutes ?? 60} minutes.`;
+}
+
+export default function ActivityPlanner({ onboarding = false, continuePath = "/" }: { onboarding?: boolean; continuePath?: string }) {
+  const [prefs, setPrefs] = useState<UserPrefs | null>(null);
+  const [draft, setDraft] = useState<PlannedRoutine | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [schemaReady, setSchemaReady] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
   async function load() {
     setLoading(true); setError("");
     try {
       const response = await fetch("/api/prefs", { cache: "no-store" });
-      if (!response.ok) throw new Error(response.status === 401 ? "Your session expired. Sign in again or continue the demo." : "Your activities could not be loaded.");
+      if (!response.ok) throw new Error(response.status === 401 ? "Your session expired. Sign in again." : "Your activities could not be loaded.");
       const data = await response.json() as { preferences: UserPrefs; planner_schema_version?: number };
-      setPrefs(data.preferences); setDraft(data.preferences.routines as PlannedRoutine[]);
-      setSchemaReady((data.planner_schema_version ?? 0) >= 2);
+      setPrefs(data.preferences);
+      const ready = (data.planner_schema_version ?? 0) >= 2;
+      setSchemaReady(ready);
+      if (onboarding && ready && data.preferences.locations.length && !data.preferences.routines.length) setDraft(newActivity(data.preferences));
     } catch (failure) { setError(failure instanceof Error ? failure.message : "Activities unavailable."); }
     finally { setLoading(false); }
   }
   useEffect(() => { void load(); }, []);
-  function change(id: string, patch: Partial<PlannedRoutine>) { setDraft((old) => old.map((item) => item.id === id ? { ...item, ...patch } : item)); setMessage(""); }
-  function add() {
-    if (!prefs?.locations.length) return;
-    setDraft((old) => [...old, { id: crypto.randomUUID(), activity: "Outdoor activity", location_id: prefs.locations[0].id,
-      start_date: todayIn(prefs.timezone), local_time: "17:00", duration_minutes: 60, recurrence: "none", weekdays: [0,1,2,3,4,5,6], alerts_enabled: true }]);
-    setMessage("");
+
+  function change(patch: Partial<PlannedRoutine>) {
+    setDraft((current) => current ? { ...current, ...patch } : current);
+    setError("");
   }
+  function cancel() { setDraft(null); setError(""); }
+
   async function save() {
-    if (!prefs) return;
-    if (!schemaReady) { setError("Durable activity storage is awaiting the planner API update. Your edits have not been sent to the server."); return; }
+    if (!prefs || !draft || saving) return;
+    if (!schemaReady) { setError("Activity saving is unavailable until the planner API supports dates, duration, repeat, and alerts."); return; }
+    if (!draft.activity.trim() || !draft.location_id || !draft.start_date || !draft.local_time ||
+        (draft.recurrence === "weekly" && !draft.weekdays.length)) {
+      setError("Add an activity name, place, date, and time. Repeating activities need at least one weekday.");
+      return;
+    }
+    if (draft.recurrence === "none" && `${draft.start_date}T${draft.local_time}` <= `${todayIn(prefs.timezone)}T${timeIn(prefs.timezone)}`) {
+      setError("Choose a future date and time for a one-time activity.");
+      return;
+    }
     setSaving(true); setError(""); setMessage("");
     try {
-      if (draft.some((r) => !r.activity.trim() || !r.location_id || !r.start_date || (r.recurrence === "weekly" && !r.weekdays.length)))
-        throw new Error("Every activity needs a name, saved place, date, time, and at least one weekday when repeating.");
       const currentResponse = await fetch("/api/prefs", { cache: "no-store" });
       if (!currentResponse.ok) throw new Error("Current preferences could not be loaded. Nothing was saved.");
-      const current = (await currentResponse.json() as { preferences: UserPrefs }).preferences;
-      const response = await fetch("/api/prefs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...current, routines: draft }) });
+      const currentData = await currentResponse.json() as { preferences: UserPrefs; planner_schema_version?: number };
+      if ((currentData.planner_schema_version ?? 0) < 2) throw new Error("The planner API cannot save all activity details yet. Nothing was sent.");
+      const current = currentData.preferences;
+      if (!current.locations.some((place) => place.id === draft.location_id)) throw new Error("This place is no longer saved. Choose another place.");
+      const updated: PlannedRoutine = { ...draft, activity: draft.activity.trim(), duration_minutes: draft.duration_minutes ?? 60,
+        recurrence: draft.recurrence ?? "weekly", alerts_enabled: draft.alerts_enabled ?? true };
+      const routines = current.routines.some((item) => item.id === updated.id)
+        ? current.routines.map((item) => item.id === updated.id ? updated : item)
+        : [...current.routines, updated];
+      if (routines.length > 10) throw new Error("You can save up to 10 activities.");
+      const response = await fetch("/api/prefs", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...current, routines }) });
       const body = await response.json() as { preferences?: UserPrefs; error?: string; detail?: string };
-      if (!response.ok || !body.preferences) throw new Error(body.error ?? body.detail ?? "Activities could not be saved.");
-      const saved = body.preferences.routines as PlannedRoutine[];
-      const durable = draft.every((r) => {
-        const got = saved.find((item) => item.id === r.id);
-        return got && got.start_date === r.start_date && got.duration_minutes === r.duration_minutes && got.recurrence === r.recurrence && got.alerts_enabled === r.alerts_enabled;
-      });
-      setPrefs(body.preferences);
-      if (!durable) throw new Error("The server saved the basic schedule but does not yet support date, duration, repeat, and alert fields. Ask the API owner to add those routine fields before relying on this plan.");
-      setDraft(saved); setMessage("Activities saved. Recommendations will use your latest forecast and settings.");
+      if (!response.ok || !body.preferences) throw new Error(body.error ?? body.detail ?? "Activity could not be saved.");
+      const reload = await fetch("/api/prefs", { cache: "no-store" });
+      if (!reload.ok) throw new Error("The activity was submitted, but saved details could not be verified. Reload before relying on it.");
+      const persisted = (await reload.json() as { preferences: UserPrefs }).preferences;
+      const saved = persisted.routines.find((item) => item.id === updated.id) as PlannedRoutine | undefined;
+      if (!saved || saved.activity !== updated.activity || saved.location_id !== updated.location_id ||
+          saved.start_date !== updated.start_date || saved.local_time !== updated.local_time ||
+          saved.duration_minutes !== updated.duration_minutes || saved.recurrence !== updated.recurrence ||
+          saved.alerts_enabled !== updated.alerts_enabled ||
+          JSON.stringify([...saved.weekdays].sort()) !== JSON.stringify([...updated.weekdays].sort())) {
+        throw new Error("The server did not retain every activity detail. Reload before relying on this plan.");
+      }
+      setPrefs(persisted); setDraft(null);
+      setMessage(`${updated.activity} saved. Its next forecast comparison is on Recommendations.`);
     } catch (failure) { setError(failure instanceof Error ? failure.message : "Save failed."); }
     finally { setSaving(false); }
   }
-  async function saveLegacy(value: UserPrefs): Promise<string> {
-    const currentResponse = await fetch("/api/prefs", { cache: "no-store" });
-    if (!currentResponse.ok) throw new Error("Current preferences are unavailable.");
-    const current = (await currentResponse.json() as { preferences: UserPrefs }).preferences;
-    const response = await fetch("/api/prefs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...current, routines: value.routines }) });
-    if (!response.ok) throw new Error("Basic routines could not be saved.");
-    const saved = (await response.json() as { preferences: UserPrefs }).preferences;
-    setPrefs(saved); setDraft(saved.routines as PlannedRoutine[]);
-    return "Basic weekly routines saved. Dated activity fields await the planner API update.";
+
+  async function remove(routine: PlannedRoutine) {
+    if (!prefs || saving || !window.confirm(`Remove ${routine.activity}?`)) return;
+    setSaving(true); setError(""); setMessage("");
+    try {
+      const currentResponse = await fetch("/api/prefs", { cache: "no-store" });
+      if (!currentResponse.ok) throw new Error("Current preferences could not be loaded.");
+      const currentData = await currentResponse.json() as { preferences: UserPrefs; planner_schema_version?: number };
+      if ((currentData.planner_schema_version ?? 0) < 2) throw new Error("The planner API cannot safely update activities right now.");
+      const current = currentData.preferences;
+      const response = await fetch("/api/prefs", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...current, routines: current.routines.filter((item) => item.id !== routine.id) }) });
+      if (!response.ok) throw new Error("Activity could not be removed.");
+      const reload = await fetch("/api/prefs", { cache: "no-store" });
+      if (!reload.ok) throw new Error("Removal could not be verified. Reload the page.");
+      const persisted = (await reload.json() as { preferences: UserPrefs }).preferences;
+      if (persisted.routines.some((item) => item.id === routine.id)) throw new Error("Activity is still saved. Please try again.");
+      setPrefs(persisted); setDraft(null); setMessage(`${routine.activity} removed.`);
+    } catch (failure) { setError(failure instanceof Error ? failure.message : "Remove failed."); }
+    finally { setSaving(false); }
   }
-  return <FeatureFrame path="/routines" eyebrow="YOUR OUTDOOR PLANS" title="Activity planner" description="Plan a specific outing or a repeating routine at one of your saved places. Recommendations use your saved heat and air-quality thresholds.">
+
+  return <FeatureFrame path="/routines" eyebrow="YOUR OUTDOOR PLANS" title="Activity planner"
+    description="Set a time and place for an outing. Noach compares that plan with available weather and modeled air-quality forecasts.">
     <div className={styles.stack}>
-      {loading && <div className={styles.loading} role="status">Loading activities…</div>}
-      {error && <div className={styles.error} role="alert">{error} {loading || saving ? null : <button className={styles.quiet} onClick={() => void load()}>Reload saved activities</button>}</div>}
+      {loading && <div className={styles.loading} role="status">Loading your activities…</div>}
+      {error && <div className={styles.error} role="alert">{error} {!prefs && !loading && <button className={styles.quiet} onClick={() => void load()}>Try again</button>}</div>}
       {!loading && prefs && <>
-        {!schemaReady && <p className={styles.notice} role="status">The dated planner form is ready, but the API still stores only basic weekly routines. Use the existing routine editor below until the planner API update is merged.</p>}
-        <section className={styles.panel}><div className={styles.between}><div><h2>Your activities</h2><p className={styles.muted}>Times use {prefs.timezone}. Up to 10 activities can be saved.</p></div><button className={styles.button} disabled={!schemaReady || !prefs.locations.length || draft.length >= 10} onClick={add}>+ New activity</button></div>
-          {!prefs.locations.length && <p className={styles.notice}>Save a location on the <a className={styles.inlineLink} href="/places">Places page</a> before planning an outing.</p>}
-          {!draft.length && <p className={styles.empty}>{schemaReady ? "No activities yet. Add your first outing to compare its planned time with forecast alternatives." : "No weekly routines saved yet. Use the editor below to add one."}</p>}
-          <div className={styles.stack}>{draft.map((routine) => <fieldset className={styles.card} key={routine.id} disabled={!schemaReady}><legend><strong>{routine.activity || "New activity"}</strong></legend>
-            <div className={styles.fields}><label>Activity name or type<input required maxLength={100} value={routine.activity} onChange={(event) => change(routine.id, { activity: event.target.value })} /></label>
-              <label>Saved place<select value={routine.location_id} onChange={(event) => change(routine.id, { location_id: event.target.value })}>{prefs.locations.map((loc) => <option key={loc.id} value={loc.id}>{loc.name}</option>)}</select></label>
-              <label>Start date<input required type="date" value={routine.start_date ?? ""} onChange={(event) => change(routine.id, { start_date: event.target.value })} /></label>
-              <label>Local start time<input required type="time" value={routine.local_time} onChange={(event) => change(routine.id, { local_time: event.target.value })} /></label>
-              <label>Estimated duration<select value={routine.duration_minutes ?? 60} onChange={(event) => change(routine.id, { duration_minutes: Number(event.target.value) })}>{[30,60,90,120,180,240].map((n) => <option value={n} key={n}>{n} minutes</option>)}</select></label>
-              <label>Repeat<select value={routine.recurrence ?? "weekly"} onChange={(event) => change(routine.id, { recurrence: event.target.value as "none" | "weekly" })}><option value="none">One time</option><option value="weekly">Weekly</option></select></label>
-              {routine.recurrence !== "none" && <div className={styles.wide}><span className={styles.small}>Repeat on</span><div className={styles.days}>{dayNames.map((day, index) => <label key={day+index}><input type="checkbox" checked={routine.weekdays.includes(index)} onChange={() => change(routine.id, { weekdays: routine.weekdays.includes(index) ? routine.weekdays.filter((d) => d !== index) : [...routine.weekdays, index].sort() })} />{day}</label>)}</div></div>}
-              <label className={styles.wide}><span>Alerts for this activity</span><span className={styles.row}><input type="checkbox" checked={routine.alerts_enabled ?? true} onChange={(event) => change(routine.id, { alerts_enabled: event.target.checked })} /> Evaluate against your saved heat and AQI thresholds</span></label>
-            </div><p className={styles.source}>First date: {displayDate(routine.start_date)} · browser notifications also require permission in Settings and an open app.</p>
-            <button className={styles.quiet} onClick={() => { setDraft((old) => old.filter((r) => r.id !== routine.id)); setMessage(""); }}>Remove activity</button>
-          </fieldset>)}</div>
-          <div className={styles.actions}>{schemaReady && <button className={styles.button} disabled={saving || draft.length > 10} onClick={() => void save()}>{saving ? "Saving…" : "Save activities"}</button>}<a className={styles.inlineLink} href="/recommendations">View recommendations</a><a className={styles.inlineLink} href="/settings">Alert thresholds and notifications</a></div>
-          {message && <p className={styles.notice} role="status">{message}</p>}
+        {onboarding && !prefs.routines.length && <section className={styles.plannerWelcome}>
+          <p className="section-label">WELCOME TO NOACH</p><h2>Make your first plan</h2>
+          <p>A saved activity helps us compare the forecast for the time and place you choose. You can set this up now or come back later.</p>
+          <div className={styles.actions}><a className={styles.inlineLink} href={continuePath}>Skip for now</a></div>
+        </section>}
+        {!schemaReady && <p className={styles.notice} role="status">Your saved activities are visible, but editing is temporarily unavailable until the planner API supports all activity details.</p>}
+        <section className={styles.panel} aria-label="Your planned activities">
+          <div className={styles.between}><div><p className="section-label">YOUR PLAN</p><h2>Planned activities</h2>
+            <p className={styles.muted}>All times are in {prefs.timezone}. Save up to 10 activities.</p></div>
+            {!draft && schemaReady && !!prefs.locations.length && prefs.routines.length < 10 &&
+              <button className={styles.button} onClick={() => { setDraft(newActivity(prefs)); setMessage(""); }}>+ Plan an activity</button>}
+          </div>
+          {!prefs.locations.length && <div className={styles.plannerEmpty}><h3>First, save a place</h3><p>Choose where you want to go so Noach can use the forecast for that area.</p>
+            <a className={styles.button} href="/places?from=planner">Add a saved place ↗</a></div>}
+          {!!prefs.locations.length && !prefs.routines.length && !draft && <div className={styles.plannerEmpty}><h3>No activities planned yet</h3>
+            <p>Start with something you enjoy outdoors. You can change the details any time.</p>
+            {schemaReady && <button className={styles.button} onClick={() => setDraft(newActivity(prefs))}>Plan your first activity</button>}</div>}
+          {!!prefs.routines.length && <div className={styles.activityList}>{prefs.routines.map((item) => {
+            const activity = item as PlannedRoutine;
+            return <article className={styles.activityItem} key={item.id}><div><h3>{item.activity}</h3>
+              <p>{summary(activity, prefs)}</p><span className={styles.small}>{activity.alerts_enabled === false ? "Forecast alerts off" : "Forecast alerts on"}</span></div>
+              <div className={styles.activityActions}>{schemaReady && <button className={styles.quiet} disabled={saving || !!draft} onClick={() => { setDraft({ ...activity }); setMessage(""); }}>Edit</button>}
+                {schemaReady && <button className={styles.quiet} disabled={saving || !!draft} onClick={() => void remove(activity)}>Remove</button>}</div></article>;
+          })}</div>}
+          {message && <div className={styles.notice} role="status">{message} <a className={styles.inlineLink} href="/recommendations">View recommendations ↗</a></div>}
         </section>
-        {!schemaReady && <PreferencesEditor value={prefs} onSave={saveLegacy} section="routines" />}
+
+        {draft && schemaReady && <section className={`${styles.panel} ${styles.plannerEditor}`} aria-label={prefs.routines.some((item) => item.id === draft.id) ? "Edit activity" : "New activity"}>
+          <div className={styles.between}><div><p className="section-label">{prefs.routines.some((item) => item.id === draft.id) ? "EDIT YOUR PLAN" : "A NEW PLAN"}</p>
+            <h2>{prefs.routines.some((item) => item.id === draft.id) ? "Edit activity" : "Plan an activity"}</h2>
+            <p className={styles.muted}>A few choices now make your recommendation more useful.</p></div>
+            <button className={styles.quiet} disabled={saving} onClick={cancel}>Cancel</button></div>
+          <form onSubmit={(event) => { event.preventDefault(); void save(); }}>
+            <div className={styles.plannerQuestions}>
+              <section className={styles.plannerQuestion}><span className={styles.stepNumber}>01</span><div><h3>What do you want to do?</h3>
+                <p>Give your activity a name you’ll recognize.</p><label className={styles.field}>Activity name<input required maxLength={100} placeholder="e.g. Basketball, a walk, gardening" value={draft.activity} onChange={(event) => change({ activity: event.target.value })} /></label></div></section>
+              <section className={styles.plannerQuestion}><span className={styles.stepNumber}>02</span><div><h3>Where will you go?</h3>
+                <p>Choose one of your saved places. <a className={styles.inlineLink} href="/places?from=planner">Add another place ↗</a></p>
+                <label className={styles.field}>Saved place<select required value={draft.location_id} onChange={(event) => change({ location_id: event.target.value })}>{prefs.locations.map((place) => <option key={place.id} value={place.id}>{place.name}</option>)}</select></label></div></section>
+              <section className={styles.plannerQuestion}><span className={styles.stepNumber}>03</span><div><h3>When are you going?</h3>
+                <p>Choose a local date and time in {prefs.timezone}.</p><div className={styles.plannerTwoColumns}>
+                  <label className={styles.field}>Start date<input required type="date" value={draft.start_date ?? ""} onChange={(event) => change({ start_date: event.target.value })} /></label>
+                  <label className={styles.field}>Start time<input required type="time" value={draft.local_time} onChange={(event) => change({ local_time: event.target.value })} /></label>
+                </div></div></section>
+              <section className={styles.plannerQuestion}><span className={styles.stepNumber}>04</span><div><h3>Will this happen again?</h3>
+                <div className={styles.choiceRow}><label className={styles.choice}><input type="radio" name="repeat" checked={draft.recurrence === "none"} onChange={() => change({ recurrence: "none" })} />Just this once</label>
+                  <label className={styles.choice}><input type="radio" name="repeat" checked={draft.recurrence !== "none"} onChange={() => change({ recurrence: "weekly" })} />Repeat weekly</label></div>
+                {draft.recurrence === "weekly" && <fieldset className={styles.weekdays}><legend>Repeat on</legend><div className={styles.days}>{days.map((day, index) => <label key={day} className={styles.choice}>
+                  <input type="checkbox" checked={draft.weekdays.includes(index)} onChange={() => change({ weekdays: draft.weekdays.includes(index) ? draft.weekdays.filter((value) => value !== index) : [...draft.weekdays, index].sort() })} />{day.slice(0, 3)}</label>)}</div></fieldset>}</div></section>
+              <section className={styles.plannerQuestion}><span className={styles.stepNumber}>05</span><div><h3>How long will it last?</h3>
+                <p>We’ll check the forecast across the whole activity.</p><label className={styles.field}>Duration<select value={draft.duration_minutes ?? 60} onChange={(event) => change({ duration_minutes: Number(event.target.value) })}>
+                  {durations.map((value) => <option key={value} value={value}>{value} minutes</option>)}</select></label></div></section>
+              <section className={styles.plannerQuestion}><span className={styles.stepNumber}>06</span><div><h3>Forecast alerts</h3>
+                <p>Alerts compare the forecast during this activity with your saved heat and AQI thresholds. You can change those in <a className={styles.inlineLink} href="/settings">Settings</a>.</p>
+                <label className={styles.choice}><input type="checkbox" checked={draft.alerts_enabled ?? true} onChange={(event) => change({ alerts_enabled: event.target.checked })} />Alert me about this activity</label>
+                <p className={styles.small}>Browser notifications also need permission in Settings and an open page.</p></div></section>
+            </div>
+            <div className={styles.plannerReview}><p className="section-label">YOUR PLAN AT A GLANCE</p><strong>{summary(draft, prefs)}</strong>
+              <span>{draft.alerts_enabled === false ? "Forecast alerts off" : "Forecast alerts on"}</span></div>
+            <div className={styles.actions}><button className={styles.button} disabled={saving} type="submit">{saving ? "Saving…" : "Save activity"}</button>
+              <button className={styles.quiet} disabled={saving} type="button" onClick={cancel}>Cancel</button></div>
+          </form>
+        </section>}
       </>}
     </div>
   </FeatureFrame>;

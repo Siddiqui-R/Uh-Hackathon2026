@@ -43,7 +43,7 @@ const pageDescriptions: Record<WorkspacePage, string> = {
   settings: "Manage your profile, thresholds and notification preferences.",
 };
 
-export default function Workspace({ page }: { page: WorkspacePage }) {
+export default function Workspace({ page, returnToPlanner = false }: { page: WorkspacePage; returnToPlanner?: boolean }) {
   const [briefing, setBriefing] = useState<Briefing | null>(null), [prefs, setPrefs] = useState(initialPreferences);
   const [operations, setOperations] = useState<Operations | null>(null), [error, setError] = useState("");
   const [prefsError, setPrefsError] = useState("");
@@ -284,7 +284,8 @@ export default function Workspace({ page }: { page: WorkspacePage }) {
           <button className="secondary listen-button" disabled={!voice || audioBusy || !view} onClick={() => void play((demo ? "Demonstration briefing. " : "") + (view?.recommendations.map((r) => r.title + ". " + r.reason).join(" ") ?? ""))}>{audioBusy ? "Preparing audio…" : "◖ Listen to my briefing"}</button>
           <p className="tiny">{view ? "Updated " + localTime(view.generated_at, view.timezone) : "Waiting for data"} · <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Open-Meteo</a> / <a href="https://atmosphere.copernicus.eu/" target="_blank" rel="noreferrer">CAMS</a></p>
         </section>}
-      {page === "places" && <div className="settings-anchor"><PreferencesEditor value={prefs} onSave={save} section="places" /></div>}
+      {page === "places" && <div className="settings-anchor"><PreferencesEditor value={prefs} onSave={save} section="places" />
+        {returnToPlanner && <p className="notice"><a href="/routines">← Back to the activity planner</a> after saving your place.</p>}</div>}
       {page === "routines" && <div className="settings-anchor"><PreferencesEditor value={prefs} onSave={save} section="routines" /></div>}
       {page === "places" && <section id="map" className="map-section"><div className="section-heading"><div><p className="section-label">CONDITIONS BY PLACE</p><h2>Check any spot in Houston.</h2></div><span className="tiny">Air quality, heat, rain, bayou gauges and the power grid, with advice that follows where you tap</span></div>
         <ConditionsMap readings={view?.hazards ?? []} prefs={prefs} grid={grid} />

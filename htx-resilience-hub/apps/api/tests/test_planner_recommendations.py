@@ -75,6 +75,9 @@ class PlannerRecommendationTests(unittest.TestCase):
             restored, storage = asyncio.run(round_trip())
         self.assertEqual(storage, "database")
         self.assertEqual(restored.model_dump(mode="json"), profile.model_dump(mode="json"))
+        with self.assertRaises(ValueError):
+            next_activity(restored.routines[0], restored, datetime(2026, 10, 11, 14, 30, tzinfo=UTC))
+        self.assertEqual(build_recommendations(restored, [forecast()], [], datetime(2026, 10, 11, 14, 30, tzinfo=UTC)), [])
 
     def test_planner_fields_round_trip_through_preferences_api(self):
         payload = UserPrefs(user_id="planner-test", locations=[PLACE], routines=[

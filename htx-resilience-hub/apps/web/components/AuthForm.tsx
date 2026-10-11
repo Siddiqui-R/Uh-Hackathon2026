@@ -18,7 +18,13 @@ export default function AuthForm({ flow, token = "", nextPath = "/", sessionWarn
       const response = await fetch("/api/auth/" + flow, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const result = await response.json() as { error?: string; message?: string; dev_reset_url?: string };
       if (!response.ok) throw new Error(result.error ?? "Please try again.");
-      if (flow === "login" || flow === "signup") { window.location.assign(destination); return; }
+      if (flow === "signup") {
+        const onboarding = new URLSearchParams({ welcome: "1" });
+        if (destination !== "/" && !destination.startsWith("/routines")) onboarding.set("continue", destination);
+        window.location.assign(`/routines?${onboarding}`);
+        return;
+      }
+      if (flow === "login") { window.location.assign(destination); return; }
       setMessage(result.message ?? "Done.");
       if (result.dev_reset_url) setResetLink(result.dev_reset_url);
     } catch (error: unknown) { setMessage(error instanceof Error ? error.message : "Please try again."); }
