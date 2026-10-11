@@ -52,7 +52,7 @@ export default function RecommendationExperience() {
     setSelected(outdoor.find((card) => `activity-${card.id}` === hash)?.id ?? outdoor[0].id);
   }, [briefing]);
   function dayForecast(card: Recommendation): Forecast | undefined {
-    if (!briefing || card.demo || outlookQuality(card).length) return undefined;
+    if (!briefing || outlookQuality(card).length) return undefined;
     const placeId = prefs?.routines.find((routine) => routine.id === card.id)?.location_id, spot = card.location_coordinates;
     return briefing.forecasts.find((forecast) => forecast.location.id === placeId)
       ?? briefing.forecasts.find((forecast) => spot && forecast.location.lat === spot.lat && forecast.location.lon === spot.lon)

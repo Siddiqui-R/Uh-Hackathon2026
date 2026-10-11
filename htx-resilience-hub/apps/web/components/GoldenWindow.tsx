@@ -288,7 +288,7 @@ export default function GoldenWindow({ card, forecast, timezone, thresholds }: {
     <p className={styles.compare}>{moved
       ? `${format.when.format(now)} compared with your planned ${format.when.format(planned)}: feels-like ${difference(current.values.feels, reference.values.feels, "°")}, AQI ${difference(current.values.aqi, reference.values.aqi, "")}, rain chance ${difference(current.values.rain, reference.values.rain, " points")}.${dark ? " It will be dark for part of this time." : ""}`
       : "This is your planned time. Drag the block or press Find my window to compare another time."}</p>
-    <p className={styles.fine}>Modeled hourly forecast for {forecast.location.name}. Values change once an hour; the sky blends between hours for display only, and the sun follows the real solar position for this place.
+    <p className={styles.fine}>{card.demo ? "Illustrative demo values, not a live forecast," : "Modeled hourly forecast"} for {forecast.location.name}. Values change once an hour; the sky blends between hours for display only, and the sun follows the real solar position for this place.
       “Close” means within 5°F of your heat limit, within 20 points of your AQI limit, or a rain chance above 30%. The rain limit of 50% is the app’s default. These are your saved preferences, not a safety assessment, and cold-weather risk is not evaluated.</p>
   </section>;
 }

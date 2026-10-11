@@ -1,4 +1,4 @@
-import type { ActivityConditions, AreaConditions, Briefing, Location, PointConditions, Recommendation, Routine, UserPrefs } from "./types";
+import type { ActivityConditions, AreaConditions, Briefing, ForecastHour, Location, PointConditions, Recommendation, Routine, UserPrefs } from "./types";
 import { demoBriefing } from "./demo";
 
 const zone = "America/Chicago";
@@ -77,15 +77,36 @@ function recommendation(routine: Routine, place: Location, prefs: UserPrefs, now
     ], suggestions: [{ title: "Review heat safety guidance", description: "Official outdoor heat guidance", source_url: "https://www.weather.gov/safety/heat" }] };
 }
 
+// The hourly values follow each card, so the day view and the card describe the same illustrative hours.
+function alignedHours(hours: ForecastHour[], cards: Recommendation[]): ForecastHour[] {
+  const aligned = hours.map((hour) => ({ ...hour }));
+  const apply = (from: number, to: number, values: ActivityConditions) => {
+    for (const hour of aligned) {
+      const at = Date.parse(hour.time);
+      if (at + 3_600_000 > from && at < to) Object.assign(hour, { temperature_2m: values.temperature_f ?? undefined, apparent_temperature: values.feels_like_f ?? undefined,
+        us_aqi: values.us_aqi ?? undefined, precipitation_probability: values.precipitation_probability ?? undefined });
+    }
+  };
+  for (const card of cards) {
+    const start = Date.parse(card.time), length = (card.duration_minutes ?? 60) * 60_000;
+    const later = card.alternative_time ? Date.parse(card.alternative_time) : null;
+    if (card.original_conditions) apply(start, later ?? start + length, card.original_conditions);
+    if (card.alternative_conditions && later !== null) apply(later, later + length, card.alternative_conditions);
+  }
+  return aligned;
+}
+
 export function demoBriefingFor(prefs: UserPrefs): Briefing {
   const base = demoBriefing();
   const now = new Date();
+  const recommendations = prefs.routines.flatMap((routine) => {
+    const place = prefs.locations.find((location) => location.id === routine.location_id);
+    return place && (routine.recurrence !== "none" || Date.parse(nextTime(routine, now)) > now.getTime()) ? [recommendation(routine, place, prefs, now)] : [];
+  });
   return { ...base, generated_at: now.toISOString(), locations: prefs.locations,
-    forecasts: prefs.locations.map((location) => ({ ...base.forecasts[0], location })),
-    recommendations: prefs.routines.flatMap((routine) => {
-      const place = prefs.locations.find((location) => location.id === routine.location_id);
-      return place && (routine.recurrence !== "none" || Date.parse(nextTime(routine, now)) > now.getTime()) ? [recommendation(routine, place, prefs, now)] : [];
-    }), coverage: "Illustrative demo only. Weather, air quality, gauge readings and plan outlooks are simulated." };
+    forecasts: prefs.locations.map((location) => ({ ...base.forecasts[0], location,
+      hours: alignedHours(base.forecasts[0].hours, recommendations.filter((card) => card.location === location.name)) })),
+    recommendations, coverage: "Illustrative demo only. Weather, air quality, gauge readings and plan outlooks are simulated." };
 }
 
 export function demoArea(): AreaConditions {
