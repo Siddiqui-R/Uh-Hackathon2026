@@ -2,11 +2,11 @@
 
 A personal Houston environmental assistant: save places and routines, plan outdoor activities with weather and modeled air quality, review observed bayou and AirNow PM2.5 station conditions, and receive relevant alerts. Station anomalies are unusual readings requiring review, not confirmed emergencies. Live grid and road-closure ingestion are deferred.
 
-Team progress: [delivery checklist](https://github.com/Siddiqui-R/Uh-Hackathon2026/issues/6). Each remaining workstream has an owner, acceptance checks and a linked GitHub issue. Claim your task, check verified steps and close the issue when its acceptance checks pass.
+Team progress: [current delivery status](deploy/DELIVERY_STATUS.md) and [GitHub issue #6](https://github.com/Siddiqui-R/Uh-Hackathon2026/issues/6).
 
 ## Local setup
 
-Use Node.js 22+, Python 3.10+, and optionally Docker Compose v2. Run from this directory.
+Use Node.js 24, Python 3.12, and optionally Docker Compose v2. Run from this directory.
 
 ```powershell
 Copy-Item .env.example .env
@@ -26,7 +26,7 @@ If local signup says “Not Found,” the API on port 8000 is running an older o
 
 Passwords use salted PBKDF2-HMAC-SHA256 hashes. Account sessions are opaque, database-backed tokens kept in secure HttpOnly cookies in production; only a SHA-256 hash of each token is stored. Reset links expire after 30 minutes, can be used once, and revoke existing sessions. Configure `APP_BASE_URL`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM`, and optionally `SMTP_USERNAME`/`SMTP_PASSWORD` for reset email. SMTP uses STARTTLS. For local development without SMTP, set `NOACH_DEV_RESET_LINKS=true` with `NOACH_ENV=development` to show a reset link in the browser. Never enable that flag in production. These variables belong on the server, never in `NEXT_PUBLIC_*` settings.
 
-When Docker or a database is unavailable, run `python tools/demo_local.py` after installing dependencies, then open http://localhost:3001. This explicit rehearsal runs the API and web frontend without workers or durable storage. It can fetch real Open-Meteo modeled forecasts; the bayou fallback, simulated PM2.5 events, nearby alerts and saved preferences are labeled demo or temporary. Everything in process memory resets when the API restarts. Set `NOACH_DEMO_STORAGE=memory` only for this development path; remove it when `DATABASE_URL` is ready, then run migrations and the normal supervisor. This temporary mode does not verify Tiger Data, worker persistence or Vultr deployment.
+When Docker or a database is unavailable, run `python tools/demo_local.py` after installing dependencies, then open http://localhost:3001. This explicit rehearsal runs the API and web frontend without workers or durable storage. It can fetch real Open-Meteo modeled forecasts; the bayou fallback, simulated PM2.5 events, nearby alerts and saved preferences are labeled demo or temporary. Everything in process memory resets when the API restarts. Set `NOACH_DEMO_STORAGE=memory` only for this development path; remove it when `DATABASE_URL` is ready, then run migrations and the normal supervisor. This temporary mode does not verify Tiger Data or worker persistence. The current web UI requires an account for feature pages, including in this local mode; there is no anonymous full-feature demo entry on the login page.
 
 For a local Timescale database: `docker compose up -d db`. The development Compose stack overrides DATABASE_URL to its local database; never use that stack for Tiger Cloud production. A fresh local volume applies all migration files. Existing databases use the migration runner, which tracks applied filenames under an advisory lock.
 
@@ -52,7 +52,7 @@ After each USGS ingestion, the worker also examines fresh gage-height readings i
 
 All browser API calls go through Next.js. Signed HttpOnly cookies assign anonymous demo profiles; account users have a separate secure HttpOnly cookie backed by a database session. The web proxy derives the user ID from that session, and the backend checks that account requests target the signed-in owner. Direct backend access requires a private internal token in production. Keep the backend private and configure provider quotas.
 
-The navigation now has separate Dashboard, Places, Routines, Recommendations, Live Monitor, Ask the Assistant, and Settings pages. Signed-out visitors first see a public dashboard at `/`, with a sign-in button in its hero. Its citywide condition cards load non-personal modeled weather/air data and available bayou observations through the server; unavailable, stale, and simulated readings are labeled. Feature pages require sign-in and return visitors to their requested page afterward. Saved places, routines, thresholds, alerts and assistant conversations use the account's ID. Browser demo profiles remain available without signup; their data is local to that browser's session, and a database-free rehearsal remains temporary. Account conversation history persists in Tiger Data and loads on the Assistant page. Settings includes display name, thresholds, memory and in-browser notification/voice preferences. Browser notifications still require device permission and an open page.
+The navigation now has separate Dashboard, Places, Routines, Recommendations, Live Monitor, Ask the Assistant, and Settings pages. Signed-out visitors first see a public dashboard at `/`, with a sign-in button in its hero. Its citywide condition cards load non-personal modeled weather/air data and available bayou observations through the server; unavailable, stale, and simulated readings are labeled. Feature pages require sign-in and return visitors to their requested page afterward. After signup, an optional first-activity modal opens over the account page. It can save a new Houston place without leaving the modal, then save a dated one-time or weekly activity and offer a recommendation link. Skipping takes the user to the normal signed-in destination; Cancel closes the modal with links to continue or plan later. Neither a place nor notification permission is required to create an account. Routines remains the place to create, edit, and remove activities later. The planner groups activity, place, local date and time, repeat days, duration, and forecast alerts into one create/edit flow with a summary before saving. Saved places, routines, thresholds, alerts and assistant conversations use the account's ID. The backend retains anonymous demo-profile support, but the current web UI does not offer access to protected features without signup. Account conversation history persists in Tiger Data and loads on the Assistant page. Settings includes display name, thresholds, memory and in-browser notification/voice preferences. Browser notifications still require device permission and an open page.
 
 GET /api/hazards preserves the agreed flat array contract. USGS gage heights are shown as unrated observations because flood stages are specific to each station; no universal height threshold triggers an alert. Earlier fixed-height alerts remain in the database for audit but are excluded from dashboard replay. Fresh rapid-rise anomalies can still create clearly labeled nearby alerts. POST /api/ask keeps a `{question,user_id,history?}` → `{answer}` response, with the user ID supplied by the web proxy. Account history is loaded server-side and cannot be replaced by a client-supplied history. Briefing, prefs, status, history, demo-alert and speech routes support the assistant.
 
@@ -83,8 +83,9 @@ The live site is https://noach.select, hosted in the `rabeet1` Vercel account.
 `noach-select` hosts Next.js; `noach-api` hosts FastAPI at https://noach-api.vercel.app.
 Tiger Cloud remains the database. The backend requires an internal token for all application routes.
 
-Pushing to `main` runs `.github/workflows/deploy-vercel.yml`: backend tests, API deployment
-with pending database migrations, then frontend deployment. The workflow uses the encrypted
+Pushing to `main` runs `.github/workflows/deploy-vercel.yml`: backend tests, API deployment,
+then frontend deployment and public health checks. Run required database migrations separately
+before a schema-changing deployment. The workflow uses the encrypted
 GitHub repository secrets `VERCEL_API_TOKEN` and `VERCEL_WEB_TOKEN`, each scoped to its
 respective project in the `rabeet` Vercel account. These tokens expire after one year and
 must be replaced in GitHub's repository secrets before they expire.
@@ -92,21 +93,17 @@ Provider keys remain in Vercel's production environment. Feature-branch pushes d
 the live site; merge them into `main` to deploy. The workflow can also be run manually from
 the repository's Actions tab. Deployment runs are serialized to keep releases in order.
 
-For a manual deployment, package source without local credentials and deploy the two projects:
-
-```powershell
-.\.venv\Scripts\python.exe tools/package_vercel_api.py ../.deployment/noach-api
-.\.venv\Scripts\python.exe tools/package_vercel_web.py ../.deployment/noach-web
-npx vercel deploy --prod --yes --scope rabeet1 --cwd ../.deployment/noach-api
-npx vercel deploy --prod --yes --scope rabeet1 --cwd ../.deployment/noach-web
-```
+For manual recovery, follow the steps in `.github/workflows/deploy-vercel.yml` from the repository root: run backend tests; package the API and web source into separate directories; write each project's `.vercel/project.json` with its workflow project ID and organization ID; deploy the API first, then the web app with their respective scoped tokens; and verify both public health endpoints. The older bare `npx vercel deploy` commands omitted project linking and tokens and should not be used as a production runbook. Keep tokens and `.env` files out of packaged source.
 
 Set backend production variables `DATABASE_URL`, `INTERNAL_API_TOKEN`, `NOACH_ENV=production`,
 `NOACH_DEMO_MODE=false`, `HOSTING_PROVIDER=Vercel`, and the optional provider keys/models.
 For password reset, also set `APP_BASE_URL=https://noach.select` and the server-only SMTP variables above.
 Set frontend `API_BASE_URL=https://noach-api.vercel.app`, the same `INTERNAL_API_TOKEN`,
 `NOACH_ENV=production`, and optional ElevenLabs settings. Apply migrations before deployment
-with `python -m apps.api.migrate` using the production database connection.
+with `python -m apps.api.migrate` using the production database connection. The workflow's
+"Deploy API and migrations" label should not be taken as proof that migrations ran: the
+packaged Vercel entrypoint only imports the app, so run and verify the migration command
+separately for schema changes.
 
 Vercel runs bounded functions rather than the continuous Docker worker. While the dashboard
 is open, briefing refreshes run due jobs under a database lock: flood/forecast ingestion at

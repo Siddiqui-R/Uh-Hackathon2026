@@ -27,7 +27,7 @@ export default function RecommendationExperience() {
       {!loading && briefing && <>
         <section className={styles.panel}><div className={styles.between}><div><h2>Your activity windows</h2><p className={styles.muted}>Forecast generated {stamp(briefing.generated_at)} · {briefing.timezone}</p></div><a className={styles.inlineLink} href="/routines">Edit activities</a></div>
           {!prefs?.routines.length && <p className={styles.notice}>These are general planning examples. <a className={styles.inlineLink} href="/routines">Save an activity</a> for a specific place and schedule.</p>}
-          {!outdoor.length && <p className={styles.empty}>No upcoming activities have a usable forecast window. Plan an activity or check again when data is available.</p>}
+          {!outdoor.length && <p className={styles.empty}>No upcoming activities have a usable forecast window. One-time plans stop appearing after their start time; edit an activity or check again when forecast data is available.</p>}
           <div className={styles.cards}>{outdoor.map((card) => <RecommendationCard card={card} timezone={briefing.timezone} key={card.id} />)}</div>
         </section>
         <section className={styles.panel}><h2>Forecast sources and freshness</h2><p className={styles.muted}>Weather and air-quality forecasts are modeled. They are separate from observed AirNow monitors and USGS gauges.</p>

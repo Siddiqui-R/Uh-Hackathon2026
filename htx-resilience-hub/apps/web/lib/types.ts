@@ -5,7 +5,10 @@ export interface HazardReading {
   lat: number; lon: number; metric: string; value: number; unit: string; severity: Severity | "unrated";
 }
 export interface Location { id: string; name: string; kind: "home" | "school" | "work" | "other"; lat: number; lon: number; }
-export interface Routine { id: string; activity: string; location_id: string; local_time: string; weekdays: number[]; }
+export interface Routine {
+  id: string; activity: string; location_id: string; local_time: string; weekdays: number[];
+  start_date?: string | null; duration_minutes?: number; recurrence?: "none" | "weekly"; alerts_enabled?: boolean;
+}
 export interface UserPrefs {
   user_id: string; locations: Location[]; routines: Routine[]; timezone: string;
   thresholds: Record<string, number>; memory_enabled: boolean;

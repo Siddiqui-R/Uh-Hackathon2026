@@ -1,5 +1,5 @@
 """Public contracts for noach.select."""
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import BaseModel, Field, model_validator, field_validator
@@ -34,6 +34,17 @@ class Routine(BaseModel):
     location_id: str
     local_time: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
     weekdays: list[int] = Field(default_factory=lambda: list(range(7)), min_length=1, max_length=7)
+    start_date: date | None = None
+    duration_minutes: int = Field(default=60, ge=15, le=480)
+    recurrence: Literal["none", "weekly"] = "weekly"
+    alerts_enabled: bool = True
+
+    @model_validator(mode="after")
+    def validate_start_date(self) -> "Routine":
+        if self.recurrence == "none" and self.start_date is None:
+            raise ValueError("One-time activities require a start date")
+        return self
+
     @field_validator("weekdays")
     @classmethod
     def valid_days(cls, days: list[int]) -> list[int]:
