@@ -1,4 +1,4 @@
-"""Noach Select: environmental context, grounded AI, preferences and SSE."""
+"""Noach: environmental context, grounded AI, preferences and SSE."""
 import asyncio
 import hmac
 import json
@@ -39,7 +39,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         require_env("INTERNAL_API_TOKEN")
     yield
 
-app = FastAPI(title="Noach Select",version="0.3.0",lifespan=lifespan)
+app = FastAPI(title="Noach",version="0.3.0",lifespan=lifespan)
 app.include_router(auth_router)
 
 @app.middleware("http")
@@ -61,7 +61,7 @@ async def internal_access(request: Request, call_next: Callable[[Request], Await
 
 @app.get("/health")
 async def health() -> dict[str,str]:
-    return {"status":"ok","service":"Noach Select","mode":"demo-enabled" if demo_mode() else "live"}
+    return {"status":"ok","service":"Noach","mode":"demo-enabled" if demo_mode() else "live"}
 
 @app.get("/api/hazards",response_model=list[HazardReading])
 async def hazard_route(response: Response) -> list[dict]:

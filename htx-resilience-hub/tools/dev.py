@@ -23,7 +23,7 @@ def main() -> None:
     try:
         for name,command,cwd in commands:
             processes.append((name,subprocess.Popen(command,cwd=cwd)))
-        print(f"Noach Select: http://localhost:{web_port} (API: 8000; supervised local workers)",flush=True)
+        print(f"Noach: http://localhost:{web_port} (API: 8000; supervised local workers)",flush=True)
         while all(process.poll() is None for _,process in processes):
             time.sleep(1)
         failed=[f"{name} (exit {process.returncode})" for name,process in processes if process.poll() is not None]

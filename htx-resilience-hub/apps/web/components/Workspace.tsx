@@ -168,7 +168,7 @@ export default function Workspace({ page }: { page: WorkspacePage }) {
         const alertTime = new Date(alert.time).getTime();
         const recent = !alreadyKnown && alertTime >= streamOpenedAt && Date.now() - alertTime < 120_000;
         if (recent && notifyRef.current && "Notification" in window && Notification.permission === "granted") {
-          const notice = new Notification(alert.demo ? "DEMO · Noach Select" : "Noach Select · conditions changed", {
+          const notice = new Notification(alert.demo ? "DEMO · Noach" : "Noach · conditions changed", {
             body: alert.message, tag: `guardian:${alert.location_id}:${alert.hazard}`,
           });
           notice.onclick = () => { window.focus(); document.getElementById("alerts")?.scrollIntoView({ behavior: "smooth" }); notice.close(); };
@@ -229,7 +229,7 @@ export default function Workspace({ page }: { page: WorkspacePage }) {
   }
   async function logout() {
     const response = await fetch("/api/auth/logout", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-    if (response.ok) window.location.href = "/";
+    if (response.ok) window.location.replace("/login");
     else setSessionError("Could not end the session. Please try again.");
   }
   async function enableNotifications() {
@@ -250,14 +250,14 @@ export default function Workspace({ page }: { page: WorkspacePage }) {
   }
 
   return <div className="app-shell">
-    <header className="site-header"><a href="/" className="wordmark"><span className="brand-icon">✳</span> Noach Select</a>
+    <header className="site-header"><a href="/" className="wordmark"><span className="brand-icon">✳</span> Noach</a>
       <nav aria-label="Main navigation">{navigation.map((item) => <a key={item.page} href={item.href} aria-current={page === item.page ? "page" : undefined}>{item.label}{item.page === "dashboard" && unreadCount > 0 ? <span className="nav-count" aria-label={`${unreadCount} unread alerts`}>{unreadCount}</span> : null}</a>)}</nav>
-      <span className="account-status">{viewer?.mode === "account" ? <><span>{viewer.display_name ?? viewer.email}</span><button className="quiet" onClick={() => void logout()}>Log out</button></> : <><span>Demo</span><a href="/login">Sign in</a></>}</span>
+      <span className="account-status">{viewer?.mode === "account" ? <><span>{viewer.display_name ?? viewer.email}</span><button className="quiet" onClick={() => void logout()}>Log out</button></> : <span>Checking sign-in…</span>}</span>
     </header>
     <main>
-      {sessionError ? <section className="panel signed-out"><h1>Sign in again</h1><p className="muted">{sessionError}</p><div className="hero-actions"><a className="primary" href="/login">Sign in</a><button className="secondary" onClick={() => void fetch("/api/auth/demo", { method: "POST" }).then(() => { window.location.href = "/"; })}>Continue demo</button></div></section> : <>
+      {sessionError ? <section className="panel signed-out"><h1>Sign in again</h1><p className="muted">{sessionError}</p><div className="hero-actions"><a className="primary" href={`/login?next=${encodeURIComponent(navigation.find((item) => item.page === page)?.href ?? "/")}`}>Sign in</a></div></section> : <>
       {page === "dashboard" ? <section className="hero" id="today"><div><p className="section-label">ENVIRONMENTAL INTELLIGENCE FOR HOUSTON</p><h1>Know what’s changing.<br /><em>Plan around it.</em></h1><p className="hero-copy">Weather, air and bayou conditions in one place. Get a grounded answer for your plans and a heads-up when a nearby reading changes.</p><div className="hero-actions"><a className="primary" href="/routines">Plan an activity ↗</a><a className="secondary" href="/monitor">Explore live monitor</a></div></div><div className="hero-stamp"><span className="stamp-symbol" aria-hidden>◎</span><span>LOCAL SIGNALS<br />BETTER DECISIONS</span></div></section> :
-        <section className="page-intro"><p className="section-label">NOACH SELECT / HOUSTON</p><h1>{navigation.find((item) => item.page === page)?.label}</h1><p className="muted">{pageDescriptions[page]}</p></section>}
+        <section className="page-intro"><p className="section-label">NOACH / HOUSTON</p><h1>{navigation.find((item) => item.page === page)?.label}</h1><p className="muted">{pageDescriptions[page]}</p></section>}
       {viewer?.mode === "demo" && <div className="demo-banner">You are exploring with a browser demo. <a href="/signup">Create an account</a> to save your plan across devices.</div>}
       {!viewer && <p className="muted" role="status">Loading your plan…</p>}
       {error && <div className="notice" role="status">{error}</div>}
@@ -312,6 +312,6 @@ export default function Workspace({ page }: { page: WorkspacePage }) {
       </details>}
       </>}
     </main>
-    <footer><a className="wordmark" href="/"><span className="brand-icon">✳</span> Noach Select</a><p>Local awareness. Everyday resilience.</p><span className="tiny">Built for Houston · CodeRED: Orion 2026</span></footer>
+    <footer><a className="wordmark" href="/"><span className="brand-icon">✳</span> Noach</a><p>Local awareness. Everyday resilience.</p><span className="tiny">Built for Houston · CodeRED: Orion 2026</span></footer>
   </div>;
 }

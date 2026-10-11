@@ -1,11 +1,12 @@
 import "server-only";
 import { backendUrl, proxyError } from "./backend";
 import { rateLimited } from "./session";
-import { identity } from "./account";
+import { accountSession } from "./account";
 
 export async function proxy(request: Request, path: string, personal = true): Promise<Response> {
-  const viewer = await identity();
-  if (!viewer) return Response.json({ error: "Your sign-in has expired. Sign in again." }, { status: 401 });
+  const session = await accountSession();
+  if (session.status !== "valid") return Response.json({ error: session.status === "unavailable" ? "Account service unavailable. Please try again." : "Sign in to continue." }, { status: session.status === "unavailable" ? 503 : 401 });
+  const viewer = session.account;
   const id = viewer.userId;
   const url = new URL(backendUrl(path));
   const incoming = new URL(request.url);

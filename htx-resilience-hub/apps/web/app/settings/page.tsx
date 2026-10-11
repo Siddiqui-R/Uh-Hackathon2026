@@ -1,2 +1,5 @@
 import Workspace from "@/components/Workspace";
-export default function SettingsPage() { return <Workspace page="settings" />; }
+import ProtectedPage from "@/components/ProtectedPage";
+export default function SettingsPage({ searchParams }: { searchParams?: Record<string, string | string[] | undefined> }) {
+  return <ProtectedPage path="/settings" searchParams={searchParams}><Workspace page="settings" /></ProtectedPage>;
+}

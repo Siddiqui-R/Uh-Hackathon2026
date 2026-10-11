@@ -23,7 +23,7 @@ def main() -> None:
     try:
         for command, cwd in commands:
             processes.append(subprocess.Popen(command, cwd=cwd, env=env))
-        print("Noach Select temporary local rehearsal: http://localhost:3001 (API: 8000)", flush=True)
+        print("Noach temporary local rehearsal: http://localhost:3001 (API: 8000)", flush=True)
         while all(process.poll() is None for process in processes):
             time.sleep(1)
         raise RuntimeError("A rehearsal service exited; inspect its output")

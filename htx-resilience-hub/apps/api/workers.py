@@ -8,7 +8,7 @@ from typing import Any
 from .db import connection
 from .environment import UH, forecast, fresh
 from .models import UserPrefs
-from .recommendations import next_activity, hour_for, risks, suggestions
+from .recommendations import next_activity, hour_for, hours_for_duration, risks, suggestions
 from .store import job_update, persist_alert, get_prefs
 from .providers import gemini_answer
 from .ingest.flood import main as flood_main
@@ -18,7 +18,12 @@ from .flood_anomalies import detect_flood_anomalies
 def alert_candidates(prefs: UserPrefs, snapshots: list[dict[str,Any]], now: datetime) -> list[tuple[str,dict[str,Any]]]:
     results: list[tuple[str,dict[str,Any]]] = []
     for routine in prefs.routines:
-        at = next_activity(routine,prefs,now)
+        if not getattr(routine, "alerts_enabled", True):
+            continue
+        try:
+            at = next_activity(routine,prefs,now)
+        except ValueError:
+            continue
         if not timedelta(0) <= at-now <= timedelta(hours=1):
             continue
         snapshot = next((f for f in snapshots if f["location"]["id"]==routine.location_id),None)
@@ -27,9 +32,13 @@ def alert_candidates(prefs: UserPrefs, snapshots: list[dict[str,Any]], now: date
         hour = hour_for(snapshot["hours"],at)
         if not hour:
             continue
-        for category in risks(hour,prefs):
+        duration = getattr(routine, "duration_minutes", None)
+        period = hours_for_duration(snapshot["hours"], at, duration) if duration else [hour]
+        if not period:
+            continue
+        for category in sorted({category for part in period for category in risks(part,prefs)}):
             key = f"{prefs.user_id}:{routine.id}:{hour['time']}:{category}"
-            message = f"{routine.activity} at {routine.local_time}: your {category} preference threshold is exceeded in the modeled forecast for {snapshot['location']['name']}."
+            message = f"{routine.activity} at {routine.local_time}: your {category} preference threshold is exceeded during the activity in the modeled forecast for {snapshot['location']['name']}."
             results.append((key,{"id":"0","time":now.isoformat(),"user_id":prefs.user_id,"hazard":category,"severity":"watch",
                 "message":message,"channel":"dashboard","location_id":routine.location_id,"station_id":None,"suggestions":suggestions(category),"demo":False}))
     return results

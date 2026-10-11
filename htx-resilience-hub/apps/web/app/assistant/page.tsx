@@ -1,2 +1,5 @@
 import Workspace from "@/components/Workspace";
-export default function AssistantPage() { return <Workspace page="assistant" />; }
+import ProtectedPage from "@/components/ProtectedPage";
+export default function AssistantPage({ searchParams }: { searchParams?: Record<string, string | string[] | undefined> }) {
+  return <ProtectedPage path="/assistant" searchParams={searchParams}><Workspace page="assistant" /></ProtectedPage>;
+}

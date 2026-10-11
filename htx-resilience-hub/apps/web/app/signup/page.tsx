@@ -1,2 +1,5 @@
 import AuthForm from "@/components/AuthForm";
-export default function SignupPage() { return <AuthForm flow="signup" />; }
+import { safeReturnTo } from "@/lib/returnTo";
+export default function SignupPage({ searchParams }: { searchParams?: { next?: string } }) {
+  return <AuthForm flow="signup" nextPath={safeReturnTo(searchParams?.next)} />;
+}

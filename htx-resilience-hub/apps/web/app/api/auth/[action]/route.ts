@@ -31,6 +31,9 @@ export async function POST(request: Request, { params }: { params: { action: str
       },
       body: JSON.stringify(body), cache: "no-store", signal: AbortSignal.timeout(30_000),
     });
+    if (upstream.status === 404) return Response.json({ error: process.env.NOACH_ENV === "production"
+      ? "The account service connected to this site does not support this action yet. Please contact the site owner."
+      : "The local API does not have this account route. Stop old API processes, then restart both services with python tools/dev.py." }, { status: 502 });
     const result = await upstream.json() as { session_token?: string; user?: unknown; detail?: string; message?: string; dev_reset_url?: string };
     if (!upstream.ok) {
       if (action === "logout" && upstream.status === 401) { clearAccountCookie(); return Response.json({ ok: true }); }

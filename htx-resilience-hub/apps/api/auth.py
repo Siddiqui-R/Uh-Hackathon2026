@@ -185,7 +185,7 @@ async def update_profile(request: Request, payload: ProfileUpdate) -> dict:
 
 def send_reset_email(address: str, reset_url: str) -> None:
     message = EmailMessage()
-    message["Subject"] = "Reset your Noach Select password"
+    message["Subject"] = "Reset your Noach password"
     message["From"] = os.environ["SMTP_FROM"]
     message["To"] = address
     message.set_content("Use this link within 30 minutes to reset your password:\n\n" + reset_url + "\n\nIf you did not request this, ignore this email.")

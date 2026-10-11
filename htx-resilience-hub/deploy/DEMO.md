@@ -1,4 +1,4 @@
-# Noach Select: two-minute rehearsal
+# Noach: two-minute rehearsal
 
 1. Save UH and a basketball routine at 5 PM. Explain the daily decision the assistant supports.
 2. Show the recommendation, modeled weather/AQI, feels-like temperature, timestamps and alternative time. Ask the basketball question; identify Gemini or the displayed fallback honestly.

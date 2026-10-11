@@ -91,6 +91,12 @@ class AccountStorageTests(unittest.IsolatedAsyncioTestCase):
 
 
 class IsolationTests(unittest.TestCase):
+    def test_signup_route_is_registered(self):
+        with patch.dict(os.environ, {"INTERNAL_API_TOKEN":"test-token", "DATABASE_URL":"mock"}):
+            with TestClient(app) as client:
+                response = client.post("/api/auth/signup", headers={"x-internal-token":"test-token"}, json={})
+        self.assertEqual(response.status_code, 422)
+
     def test_account_session_binds_personal_routes_to_owner(self):
         account = {"user_id":"acct:alice", "email":"alice@example.com", "display_name":"Alice"}
         with patch.dict(os.environ, {"INTERNAL_API_TOKEN":"test-token", "DATABASE_URL":"mock"}), \

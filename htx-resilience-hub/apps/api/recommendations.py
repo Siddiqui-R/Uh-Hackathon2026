@@ -1,5 +1,5 @@
 """Deterministic source-linked suggestions; models never trigger alerts."""
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 from .environment import UH, distance, fresh
@@ -10,11 +10,21 @@ SOURCES = {"heat":"https://www.weather.gov/safety/heat", "air":"https://www.airn
 
 def next_activity(routine: Routine, prefs: UserPrefs, now: datetime) -> datetime:
     local = now.astimezone(ZoneInfo(prefs.timezone))
+    start_date = getattr(routine, "start_date", None)
+    if isinstance(start_date, str):
+        start_date = date.fromisoformat(start_date)
     hour,minute = map(int,routine.local_time.split(":"))
+    if getattr(routine, "recurrence", "weekly") == "none":
+        if not start_date:
+            raise ValueError("One-time activity has no upcoming time")
+        at = datetime(start_date.year,start_date.month,start_date.day,hour,minute,tzinfo=ZoneInfo(prefs.timezone))
+        if at < local:
+            raise ValueError("One-time activity has no upcoming time")
+        return at.astimezone(timezone.utc)
     for offset in range(8):
         day = local.date()+timedelta(days=offset)
         at = datetime(day.year,day.month,day.day,hour,minute,tzinfo=ZoneInfo(prefs.timezone))
-        if day.weekday() in routine.weekdays and at >= local:
+        if day.weekday() in routine.weekdays and at >= local and (not start_date or day >= start_date):
             return at.astimezone(timezone.utc)
     raise ValueError("Routine has no upcoming day")
 
@@ -58,6 +68,20 @@ def comparable(candidate: dict[str, Any], categories: list[str]) -> bool:
                and (category != "air" or candidate.get("us_aqi") is not None)
                for category in categories)
 
+def hours_for_duration(hours: list[dict[str, Any]], at: datetime, minutes: int) -> list[dict[str, Any]] | None:
+    """Require forecast coverage for every hour touched by an activity."""
+    end = at + timedelta(minutes=minutes)
+    cursor = at
+    result: list[dict[str, Any]] = []
+    while cursor < end:
+        hour = hour_for(hours, cursor)
+        if hour is None:
+            return None
+        if not result or result[-1] is not hour:
+            result.append(hour)
+        cursor = datetime.fromisoformat(hour["time"]) + timedelta(hours=1)
+    return result
+
 def grid_card(grid: dict[str,Any], location: str, now: datetime) -> dict[str,Any]:
     card = {"id":"grid","title":"Power grid","location":location,"time":grid.get("updated") or now.isoformat(),"category":"grid",
             "alternative_time":None,"demo":False}
@@ -79,28 +103,40 @@ def build_recommendations(prefs: UserPrefs, forecasts: list[dict[str,Any]], floo
     for routine in routines:
         location = next((loc for loc in prefs.locations if loc.id == routine.location_id), UH)
         snapshot = next((f for f in forecasts if f["location"]["id"] == location.id), None)
-        at = next_activity(routine,prefs,now) if routine.id != "daily" else now
+        try:
+            at = next_activity(routine,prefs,now) if routine.id != "daily" else now
+        except ValueError:
+            continue
         hour = hour_for(snapshot["hours"],at) if snapshot else None
-        has_evidence = bool(hour and (hour.get("apparent_temperature") is not None or hour.get("us_aqi") is not None))
+        duration = getattr(routine, "duration_minutes", None)
+        period = hours_for_duration(snapshot["hours"], at, duration) if snapshot and duration else ([hour] if hour else None)
+        has_evidence = bool(period and all(h.get("apparent_temperature") is not None or h.get("us_aqi") is not None for h in period))
         complete = bool(snapshot and fresh(snapshot["retrieved_at"],now) and has_evidence)
-        categories = risks(hour,prefs) if hour and complete else []
+        categories = sorted({category for h in period or [] for category in risks(h,prefs)}) if complete else []
         alternative = None
         alternative_hour = None
         if categories and snapshot:
             for candidate in snapshot["hours"]:
                 stamp = datetime.fromisoformat(candidate["time"])
                 local_hour = stamp.astimezone(ZoneInfo(prefs.timezone)).hour
-                if at < stamp <= at+timedelta(hours=12) and 6 <= local_hour < 21 and comparable(candidate,categories) and not risks(candidate,prefs):
+                candidate_period = hours_for_duration(snapshot["hours"], stamp, duration) if duration else [candidate]
+                if (at < stamp <= at+timedelta(hours=12) and 6 <= local_hour < 21
+                    and candidate_period and all(comparable(h,categories) and not risks(h,prefs)
+                                                 and (h.get("precipitation_probability") is None or h["precipitation_probability"] <= 50)
+                                                 for h in candidate_period)):
                     alternative = stamp.isoformat()
                     alternative_hour = candidate
                     break
         if complete and hour:
             values = []
-            if hour.get("apparent_temperature") is not None:
-                values.append(f"Modeled feels-like temperature {hour['apparent_temperature']:.0f}°F")
-            if hour.get("us_aqi") is not None:
-                values.append(f"modeled US AQI {hour['us_aqi']:.0f}")
-            reason = "; ".join(values) + ". " + ("Your selected thresholds are exceeded." if categories else "Your selected thresholds are not exceeded; this is not a safety guarantee.")
+            feels = [h["apparent_temperature"] for h in period or [] if h.get("apparent_temperature") is not None]
+            aqi = [h["us_aqi"] for h in period or [] if h.get("us_aqi") is not None]
+            if feels:
+                values.append(f"highest modeled feels-like temperature {max(feels):.0f}°F")
+            if aqi:
+                values.append(f"highest modeled US AQI {max(aqi):.0f}")
+            prefix = f"Across the {duration}-minute activity, " if duration else "At the planned time, "
+            reason = prefix + "; ".join(values) + ". " + ("Your selected thresholds are exceeded." if categories else "Your selected thresholds are not exceeded; this is not a safety guarantee.")
         else:
             reason = "Forecast coverage is incomplete or stale. Check official conditions before deciding."
         cards.append({"id":routine.id,"title":routine.activity,"location":location.name,"time":at.isoformat(),
@@ -108,8 +144,10 @@ def build_recommendations(prefs: UserPrefs, forecasts: list[dict[str,Any]], floo
           "reason":reason,"alternative_time":alternative,
           "original_conditions":conditions(hour) if complete else None,
           "alternative_conditions":conditions(alternative_hour),
-          "forecast_retrieved_at":snapshot["retrieved_at"] if snapshot and complete else None,
-          "forecast_attribution":snapshot.get("attribution") if snapshot and complete else None,
+          "forecast_retrieved_at":snapshot["retrieved_at"] if snapshot else None,
+          "forecast_attribution":snapshot.get("attribution") if snapshot else None,
+          "duration_minutes":duration,
+          "forecast_status":"missing" if not snapshot else "stale" if not fresh(snapshot["retrieved_at"],now) else "incomplete" if not has_evidence else "current",
           "suggestions":[s for c in categories for s in suggestions(c)] or suggestions("air"),"demo":False})
     if flood:
         location = prefs.locations[0] if prefs.locations else UH

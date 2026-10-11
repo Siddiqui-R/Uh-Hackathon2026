@@ -15,7 +15,7 @@ summary{cursor:pointer;list-style:none;display:flex;justify-content:space-betwee
 @media(max-width:1050px){.app-shell{padding:0 28px}.workspace{grid-template-columns:1fr 1fr}.hero-stamp{width:120px;height:120px;margin-right:0}.weather-strip{gap:14px}.module-top{flex-wrap:wrap}.panel{padding:22px}}
 @media(max-width:760px){.app-shell{padding:0 18px}.site-header{height:72px}.site-header nav{gap:16px}.header-location{display:none}.hero{padding:36px 0 28px}.hero-stamp{display:none}h1{font-size:37px;letter-spacing:-1.5px}.hero-copy{font-size:12px}.workspace{grid-template-columns:1fr}.module-grid{grid-template-columns:1fr}.alert-list{grid-template-columns:1fr}.section-heading{align-items:start;flex-direction:column;gap:10px}.panel-heading h2{font-size:23px}.preferences summary .tag{white-space:normal}.weekday-row{gap:8px}.notification-controls{gap:12px}.operations summary{flex-wrap:wrap}.status-grid{grid-template-columns:1fr}.map-controls{gap:12px}footer{flex-wrap:wrap}.desktop-break{display:none}}
 
-/* Noach Select uses a calm, daylight palette across conditions, plans and signals. */
+/* Noach uses a calm, daylight palette across conditions, plans and signals. */
 body{background:radial-gradient(circle at 75% 0%,#e7f0e9 0%,#f5f6f2 45%);color:var(--ink);font-family:Arial,Helvetica,sans-serif;font-size:14px}
 .app-shell{max-width:1500px}
 .site-header{height:76px;border-bottom:1px solid var(--line)}
@@ -73,3 +73,7 @@ input,select{background:#fffefa;border-color:#cbd9ce;color:var(--ink)}input::pla
 .auth-card .notice{margin:20px 0 0}.auth-links{display:flex;flex-wrap:wrap;gap:16px;margin-top:25px;font-size:12px;color:var(--green)}
 @media(max-width:1050px){.site-header{flex-wrap:wrap}.site-header nav{order:3;flex-basis:100%;justify-content:flex-start}.feature-cards{grid-template-columns:1fr 1fr}}
 @media(max-width:600px){.site-header{gap:12px}.site-header nav{gap:16px}.site-header nav a{font-size:12px}.account-status{margin-left:auto}.account-status>span{display:none}.feature-cards{grid-template-columns:1fr}.page-intro{padding:28px 0 20px}.auth-card{padding:25px}.auth-card h1{font-size:30px}.weekday-row{flex-wrap:wrap}.assistant-page .assistant-panel{min-height:0}}
+.public-dashboard .site-header nav{justify-content:center}
+.public-dashboard .hero-actions{align-items:center}
+.public-dashboard .public-signup{font-size:12px;color:var(--green)}
+@media(max-width:760px){.public-dashboard .hero{align-items:flex-start}}

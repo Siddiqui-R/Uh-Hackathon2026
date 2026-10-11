@@ -1,9 +1,10 @@
 import { backendUrl, proxyError } from "@/lib/backend";
-import { identity } from "@/lib/account";
+import { accountSession } from "@/lib/account";
 export const dynamic = "force-dynamic";
 export async function GET(request: Request): Promise<Response> {
-  const viewer = await identity();
-  if (!viewer) return Response.json({ error: "Sign in again" }, { status: 401 });
+  const session = await accountSession();
+  if (session.status !== "valid") return Response.json({ error: "Sign in again" }, { status: session.status === "unavailable" ? 503 : 401 });
+  const viewer = session.account;
   const url = new URL(backendUrl("/api/alerts"));
   url.searchParams.set("user_id", viewer.userId);
   const after = new URL(request.url).searchParams.get("after");

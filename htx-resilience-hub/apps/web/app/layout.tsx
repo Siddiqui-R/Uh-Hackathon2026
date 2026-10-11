@@ -3,7 +3,7 @@ import "leaflet/dist/leaflet.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Noach Select | Houston environmental intelligence",
+  title: "Noach | Houston environmental intelligence",
   description: "Plan outdoor activities with Houston weather, air and bayou context, and receive alerts when nearby conditions change.",
 };
 
