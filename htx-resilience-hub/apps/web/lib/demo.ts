@@ -18,10 +18,12 @@ export function demoBriefing(): Briefing {
       attribution: "Illustrative demo values; no live forecast connection.", source_url: "https://open-meteo.com/", storage: "demo" }],
     hazards: [{ hazard: "flood", station_id: "08074500", station_name: "Whiteoak Bayou (demo)", lat: 29.7752, lon: -95.3972,
       metric: "Gage height, feet", value: 7.71, unit: "ft", severity: "normal", time: stamp }],
+    grid: { status: "demo", severity: "normal", title: "Normal Conditions (demo)", note: "Illustrative grid status; no live ERCOT connection.",
+      eea_level: 0, reserves_mw: null, updated: stamp, scope: "ERCOT statewide grid", source_url: "https://www.ercot.com/gridmktinfo/dashboards" },
     recommendations: [{ id: "demo-outdoor", title: "Your next outdoor plan", category: "outdoor", location: "University of Houston",
       time: stamp, status: "demo preview", reason: "These illustrative conditions show how a personalized briefing works. Connect the backend to receive recommendations for your saved routines.",
       alternative_time: null, demo: true, suggestions: [{ title: "Review local conditions", description: "Check official weather and air-quality guidance before outdoor exercise.", source_url: "https://www.weather.gov/safety/heat" }] }],
-    source_status: { flood: "demo", weather: "demo", air: "demo", grid: "demo; integration deferred", preferences: "local preview" },
+    source_status: { flood: "demo", weather: "demo", air: "demo", grid: "demo", preferences: "local preview" },
     coverage: "Demo preview. Road closures and route safety are not assessed.",
   };
 }

@@ -10,6 +10,8 @@ from pydantic import ValidationError
 from apps.api.models import UserPrefs, Location, Routine
 from apps.api.environment import severity, fresh, forecast, CACHE, location_key
 from apps.api.recommendations import hour_for, next_activity, build_recommendations
+from apps.api.conditions import grid_severity, lattice, point, geocode, GEOCODES, area
+from apps.api import conditions
 from apps.api.workers import alert_candidates
 from apps.api.ingest.flood import parse_readings, write_readings, INSERT_SQL
 from apps.api.main import app
@@ -84,7 +86,29 @@ class EnvironmentalTests(unittest.TestCase):
             cursor.executemany.assert_called_with(INSERT_SQL,[rows[0][:4]+rows[0]])
             connect.return_value.__exit__.assert_called_once_with(None,None,None)
 
+    def test_grid_advice_follows_ercot_state(self) -> None:
+        live = {"status":"live","title":"Normal Conditions","note":"Enough power.","reserves_mw":"17,723","updated":NOW.isoformat(),"source_url":"https://www.ercot.com"}
+        self.assertEqual([grid_severity(s,e) for s,e in [("normal",0),("conservation",0),("normal",1),("emergency",0)]],["normal","watch","warning","warning"])
+        statuses = [build_recommendations(prefs(),[snapshot()],[],NOW,{**live,"severity":sev})[-1]["status"] for sev in ["normal","watch","warning"]]
+        self.assertEqual(statuses,["normal conditions","conserve","grid emergency"])
+        self.assertEqual(build_recommendations(prefs(),[snapshot()],[],NOW,{"status":"unavailable","severity":None})[-1]["status"],"unavailable")
+        self.assertEqual(len(build_recommendations(prefs(),[snapshot()],[],NOW)),1)
+
+    def test_lattice_covers_houston(self) -> None:
+        cells = lattice()
+        self.assertEqual(len(cells),49)
+        self.assertTrue(any(abs(lat-29.76) < .06 and abs(lon+95.37) < .07 for lat,lon in cells))
+
 class ProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_point_rehomes_routines_to_pin(self) -> None:
+        grid = {"status":"live","severity":"normal","title":"Normal","note":"","reserves_mw":None,"updated":None,"source_url":"https://www.ercot.com"}
+        pinned = {**snapshot(),"retrieved_at":datetime.now(UTC).isoformat()}
+        with patch("apps.api.conditions.forecast",new=AsyncMock(return_value=pinned)) as fc, patch("apps.api.conditions.hazards",new=AsyncMock(return_value=([],"live"))), patch("apps.api.conditions.grid_status",new=AsyncMock(return_value=grid)):
+            result = await point(prefs(),29.76012,-95.36987)
+        self.assertEqual((fc.call_args.args[0].lat,fc.call_args.args[0].lon),(29.76,-95.37))
+        self.assertEqual(result["recommendations"][0]["title"],"Basketball")
+        self.assertEqual(result["recommendations"][-1]["id"],"grid")
+
     async def test_shared_forecast_cache_keeps_place_names_private(self) -> None:
         alice = LOCATION.model_copy(update={"id":"alice-place","name":"Alice private name"})
         bob = LOCATION.model_copy(update={"id":"bob-place","name":"Bob private name"})
@@ -111,6 +135,44 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(alice.user_id,"alice")
             self.assertEqual(bob.locations,[])
 
+    async def test_geocode_drops_matches_outside_houston_and_caches(self) -> None:
+        rows = [{"name":"Rice University","display_name":"Rice University, Houston, TX","lat":"29.7168","lon":"-95.4048"},
+                {"name":"","display_name":"Houston, Mississippi","lat":"33.89","lon":"-89.0"}]
+        response = MagicMock(); response.json.return_value = rows
+        client = MagicMock(); client.get = AsyncMock(return_value=response)
+        GEOCODES.clear()
+        with patch("apps.api.conditions.httpx.AsyncClient") as factory:
+            factory.return_value.__aenter__.return_value = client
+            first = await geocode("Rice  University")
+            second = await geocode("rice university")
+        self.assertEqual(first,[{"name":"Rice University","address":"Rice University, Houston, TX","lat":29.7168,"lon":-95.4048}])
+        self.assertEqual(second,first)
+        client.get.assert_awaited_once()
+        GEOCODES.clear()
+
+    async def test_area_retries_and_does_not_hide_a_failed_layer(self) -> None:
+        def ok(names: list[str]) -> MagicMock:
+            response = MagicMock(); response.json.return_value = [{"current":{n:50 for n in names}} for _ in range(49)]
+            return response
+        calls = {"air":0,"weather":0}
+        async def get(url: str, params: dict) -> MagicMock:
+            source = "air" if "air-quality" in url else "weather"
+            calls[source] += 1
+            if source == "weather" and calls["weather"] <= 3:
+                raise conditions.httpx.ReadTimeout("slow")
+            return ok(params["current"].split(","))
+        client = MagicMock(); client.get = get
+        conditions.CACHE.pop("area",None)
+        with patch("apps.api.conditions.httpx.AsyncClient") as factory, patch("apps.api.conditions.asyncio.sleep",new=AsyncMock()):
+            factory.return_value.__aenter__.return_value = client
+            first = await area()
+            self.assertEqual(first["source_status"],{"air":"live model","weather":"unavailable"})
+            conditions.CACHE["area"] = (conditions.CACHE["area"][0]-timedelta(minutes=3),first)  # partial result expires quickly
+            second = await area()
+        self.assertEqual(second["source_status"],{"air":"live model","weather":"live model"})
+        self.assertEqual(second["cells"][0]["apparent_temperature"],50.0)
+        conditions.CACHE.pop("area",None)
+
 class RouteTests(unittest.TestCase):
     def test_internal_api_rejects_missing_token(self) -> None:
         with patch.dict(os.environ,{"INTERNAL_API_TOKEN":"test-only","DATABASE_URL":"mock"}):
@@ -129,6 +191,11 @@ class RouteTests(unittest.TestCase):
                 response=client.post("/api/ask",json={"question":"Basketball?","user_id":"alice"})
                 self.assertEqual(response.json(),{"answer":"Grounded answer"})
                 self.assertEqual(response.headers["X-AI-Provider"],"gemini")
+
+    def test_point_route_rejects_outside_houston(self) -> None:
+        with patch.dict(os.environ,{"INTERNAL_API_TOKEN":"","DATABASE_URL":"mock"}):
+            with TestClient(app) as client:
+                self.assertEqual(client.get("/api/conditions/point",params={"user_id":"a","lat":40.7,"lon":-74.0}).status_code,422)
 
 if __name__ == "__main__":
     unittest.main()

@@ -20,6 +20,7 @@ from apps.api.config import require_env
 from apps.api.db import connection
 from apps.api.models import AskRequest, AskResponse, UserPrefs, HazardReading
 from apps.api.environment import hazards
+from apps.api.conditions import area, geocode, point, in_limits
 from apps.api.providers import gemini_answer, memory_get, memory_sync
 from apps.api.service import briefing
 from apps.api.store import get_prefs, save_prefs, alerts_after, persist_alert, demo_mode, DEMO_ALERTS
@@ -59,6 +60,27 @@ async def history(station_id: str = Query(max_length=40), metric: str = Query(ma
             return [{"time":row["time"].isoformat(),"value":row["value"]} for row in await cursor.fetchall()]
     except Exception:
         return []
+
+@app.get("/api/conditions/area")
+async def conditions_area() -> dict:
+    return await area()
+
+@app.get("/api/geocode")
+async def geocode_route(q: str = Query(min_length=3,max_length=200)) -> list[dict]:
+    try:
+        return await geocode(q)
+    except Exception:
+        raise HTTPException(503,"Address search is unavailable; tap the map or use your device location instead")
+
+@app.get("/api/conditions/point")
+async def conditions_point(user_id: str = Query(min_length=1,max_length=100), lat: float = Query(), lon: float = Query()) -> dict:
+    if not in_limits(lat,lon):
+        raise HTTPException(422,"Map pins are limited to the greater Houston area")
+    try:
+        prefs,_ = await get_prefs(user_id)
+        return await point(prefs,lat,lon)
+    except Exception:
+        raise HTTPException(503,"Conditions for this point are unavailable; please retry")
 
 @app.get("/api/prefs")
 async def preferences(user_id: str = Query(min_length=1,max_length=100)) -> dict:
