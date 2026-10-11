@@ -2,6 +2,8 @@ import { cookies } from "next/headers";
 import { ACCOUNT_COOKIE, clearAccountCookie, setAccountCookie } from "@/lib/account";
 import { backendUrl, proxyError } from "@/lib/backend";
 import { rateLimited } from "@/lib/session";
+import { readDemoPreferences, clearDemoPreferences } from "@/lib/demoSession";
+import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 const actions = new Set(["signup", "login", "logout", "request-reset", "reset", "profile", "demo"]);
@@ -11,7 +13,8 @@ export async function POST(request: Request, { params }: { params: { action: str
   if (!actions.has(action)) return Response.json({ error: "Not found" }, { status: 404 });
   const origin = request.headers.get("origin");
   if (origin && origin !== new URL(request.url).origin) return Response.json({ error: "Cross-origin request rejected" }, { status: 403 });
-  if (action === "demo") { clearAccountCookie(); return Response.json({ ok: true }); }
+  if (action === "demo") { const response = NextResponse.json({ ok: true }); clearDemoPreferences(response); clearAccountCookie(); return response; }
+  if (action === "logout" && readDemoPreferences()) { const response = NextResponse.json({ ok: true, mode: "demo" }); clearDemoPreferences(response); return response; }
   const currentToken = cookies().get(ACCOUNT_COOKIE)?.value;
   if ((action === "logout" || action === "profile") && !currentToken) return Response.json({ error: "Sign in required" }, { status: 401 });
   const rateKey = currentToken ?? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "anonymous";
@@ -42,7 +45,9 @@ export async function POST(request: Request, { params }: { params: { action: str
     if (action === "signup" || action === "login") {
       if (!result.session_token) return Response.json({ error: "Account session unavailable" }, { status: 502 });
       setAccountCookie(result.session_token);
-      return Response.json({ user: result.user }, { headers: { "Cache-Control": "no-store" } });
+      const response = NextResponse.json({ user: result.user }, { headers: { "Cache-Control": "no-store" } });
+      clearDemoPreferences(response);
+      return response;
     }
     if (action === "logout" || action === "reset") clearAccountCookie();
     return Response.json(result, { headers: { "Cache-Control": "no-store" } });

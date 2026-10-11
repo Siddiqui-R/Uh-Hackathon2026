@@ -1,6 +1,7 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { backendUrl } from "./backend";
+import { readDemoPreferences } from "./demoSession";
 
 export const ACCOUNT_COOKIE = "noach_account";
 export interface Identity {
@@ -16,16 +17,11 @@ export type AccountSession =
   | { status: "missing" | "invalid" | "unavailable" };
 
 export async function accountSession(): Promise<AccountSession> {
+  if (readDemoPreferences()) return { status: "valid", account: {
+    userId: "demo_browser", mode: "demo", token: "", displayName: "Houston Explorer (Demo)",
+  } };
   const token = cookies().get(ACCOUNT_COOKIE)?.value;
-  if (!token) {
-    if (process.env.NOACH_DEMO_MODE === "true" || process.env.NOACH_DEMO_STORAGE === "memory") {
-      return { status: "valid", account: {
-        userId: "demo_guest", mode: "demo", token: "",
-        email: "demo@houston.select", displayName: "Houston Explorer (Demo)",
-      } };
-    }
-    return { status: "missing" };
-  }
+  if (!token) return { status: "missing" };
   try {
     const response = await fetch(backendUrl("/api/auth/session"), {
       headers: { "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "", "x-account-session": token },

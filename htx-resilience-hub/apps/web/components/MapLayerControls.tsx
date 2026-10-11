@@ -20,7 +20,7 @@ export default function MapLayerControls(props: MapLayerControlProps) {
         const available = layerAvailable(area, key), layer = modelLayers[key];
         return <label className={`layer-toggle${available && layers[key] ? " is-selected" : ""}`} key={key}>
           <input type="checkbox" checked={available && layers[key]} disabled={!available} onChange={(event) => props.onLayer(key, event.target.checked)} />
-          <span><strong>{layer.label}</strong><small>{available ? "Modeled forecast" : area ? "Unavailable · no validated values" : "Awaiting model data"}</small></span>
+          <span><strong>{layer.label}</strong><small>{available ? area?.source_status[layer.source] === "demo" ? "Illustrative demo" : "Modeled forecast" : area ? "Unavailable · no validated values" : "Awaiting model data"}</small></span>
         </label>;
       })}
       <label className={`layer-toggle${props.gauges && gaugeRows.length ? " is-selected" : ""}`}><input type="checkbox" checked={props.gauges && Boolean(gaugeRows.length)} disabled={!gaugeRows.length} onChange={(event) => props.onGauges(event.target.checked)} /><span><strong>Bayou gauges</strong><small>{!gaugeRows.length ? "Unavailable · no readings" : simulated ? "Simulated data" : "USGS observations"}</small></span></label>
@@ -29,7 +29,7 @@ export default function MapLayerControls(props: MapLayerControlProps) {
     </fieldset>
     <div className="layer-tools">{enabled.length > 0 && <label>Color fill<select value={enabled.includes(props.shade) ? props.shade : enabled[0]} onChange={(event) => props.onShade(event.target.value as ModelLayer)}>{enabled.map((key) => <option key={key} value={key}>{modelLayers[key].label}</option>)}</select></label>}<span className="tiny">{enabled.length ? "Other enabled layers appear as labeled values." : "Base map and available markers remain visible."}</span></div>
     <details className="layer-sources"><summary>Layer sources and times</summary>
-      {(Object.keys(modelLayers) as ModelLayer[]).map((key) => <p key={key}><strong>{modelLayers[key].label}</strong> / {modelLayers[key].provider} · modeled forecast · {layerValidTime(area, key, timezone)} · retrieved {forecastTime(area?.generated_at, timezone)} · {forecastFreshness(area?.generated_at)}</p>)}
+      {(Object.keys(modelLayers) as ModelLayer[]).map((key) => <p key={key}><strong>{modelLayers[key].label}</strong> / {area?.source_status[modelLayers[key].source] === "demo" ? "Illustrative demo values" : `${modelLayers[key].provider} · modeled forecast`} · {layerValidTime(area, key, timezone)} · retrieved {forecastTime(area?.generated_at, timezone)} · {forecastFreshness(area?.generated_at)}</p>)}
       <p><strong>Bayou gauges</strong> / {simulated ? "Simulation" : "USGS observed gage height"} · ft · {gaugeRows.length ? "Observed times are shown on each gauge." : "No readings available."} No road-safety assessment.</p>
       <p><strong>Power grid</strong> / {grid?.status === "demo" ? "Simulation only" : "ERCOT statewide report"} · reported {forecastTime(grid?.updated, timezone)} · {gridAvailable(grid) ? forecastFreshness(grid?.updated) : "Unavailable"}. No local outages or geographic grid readings.</p>
       {grid?.source_url && <a href={grid.source_url} target="_blank" rel="noreferrer">ERCOT source ↗</a>}

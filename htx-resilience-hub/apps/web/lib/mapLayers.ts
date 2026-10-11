@@ -18,7 +18,7 @@ export function validatedLayerValue(cell: AreaCell, layer: ModelLayer): number |
 }
 
 export function layerAvailable(area: AreaConditions | null, layer: ModelLayer): boolean {
-  return area?.source_status[modelLayers[layer].source] === "live model" && area.cells.some((cell) => validatedLayerValue(cell, layer) !== undefined);
+  return ["live model", "demo"].includes(area?.source_status[modelLayers[layer].source] ?? "") && area!.cells.some((cell) => validatedLayerValue(cell, layer) !== undefined);
 }
 
 export function layerValidTime(area: AreaConditions | null, layer: ModelLayer, zone: string): string {

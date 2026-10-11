@@ -231,11 +231,11 @@ export default function ConditionsMap({ readings, prefs, grid, gaugeMode }: { re
             <i className="legend-ramp" style={{ background: `linear-gradient(90deg, ${scale.stops.map(([at, color]) => `${color} ${(at - scale.stops![0][0]) / (scale.stops![scale.stops!.length - 1][0] - scale.stops![0][0]) * 100}%`).join(", ")})` }} />
             <span className="legend-ticks">{scale.stops.map(([at]) => <span key={at}>{at}{scale.suffix}</span>)}</span>
           </> : scale.bands.map((b) => <span key={b.label}><i style={{ background: b.color }} />{b.label}</span>)}
-          <span className="tiny">Modeled forecast · ~11 km cells</span>
+          <span className="tiny">{area.source_status.weather === "demo" ? "Illustrative demo" : "Modeled forecast"} · ~11 km cells</span>
         </div>}
 
       </div>
-      <p className="tiny" role="status">{areaError || (area ? `Model retrieved ${forecastTime(area.generated_at, prefs.timezone)} · ~11 km cells` : "Loading modeled layers…")}</p>
+      <p className="tiny" role="status">{areaError || (area ? `${area.source_status.weather === "demo" ? "Demo values prepared" : "Model retrieved"} ${forecastTime(area.generated_at, prefs.timezone)} · ~11 km cells` : "Loading modeled layers…")}</p>
       <div className="map-place-picker"><label>Focus a saved place<select value={prefs.locations.find((place) => place.lat === pin?.lat && place.lon === pin?.lon)?.id ?? ""} onChange={(event) => { const place = prefs.locations.find((item) => item.id === event.target.value); if (place) setPin({ lat: place.lat, lon: place.lon, name: place.name, focus: true }); }}><option value="">Choose a place</option>{prefs.locations.map((place) => <option key={place.id} value={place.id}>{place.name}</option>)}</select></label><a href="/routines">Plan an activity →</a></div>
     </section>
 

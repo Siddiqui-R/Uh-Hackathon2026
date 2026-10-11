@@ -2,11 +2,13 @@ import "server-only";
 import { backendUrl, proxyError } from "./backend";
 import { rateLimited } from "./session";
 import { accountSession } from "./account";
+import { demoApi } from "./demoApi";
 
 export async function proxy(request: Request, path: string, personal = true): Promise<Response> {
   const session = await accountSession();
   if (personal && session.status !== "valid") return Response.json({ error: session.status === "unavailable" ? "Account service unavailable. Please try again." : "Sign in to continue." }, { status: session.status === "unavailable" ? 503 : 401 });
   const viewer = session.status === "valid" ? session.account : undefined;
+  if (viewer?.mode === "demo") return demoApi(request, path.replace(/^\/api\//, ""));
   const id = viewer?.userId ?? "guest";
   const url = new URL(backendUrl(path));
   const incoming = new URL(request.url);

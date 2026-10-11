@@ -5,6 +5,19 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request): Promise<Response> {
   const session = await accountSession();
   if (session.status !== "valid") return Response.json({ error: "Sign in again" }, { status: session.status === "unavailable" ? 503 : 401 });
+  if (session.account.mode === "demo") {
+    const encoder = new TextEncoder();
+    let timer: ReturnType<typeof setInterval>;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode("event: ready\ndata: {}\n\n"));
+        timer = setInterval(() => controller.enqueue(encoder.encode(": demo heartbeat\n\n")), 15_000);
+        request.signal.addEventListener("abort", () => { clearInterval(timer); try { controller.close(); } catch {} }, { once: true });
+      },
+      cancel() { clearInterval(timer); },
+    });
+    return new Response(stream, { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform" } });
+  }
   const incoming = new URL(request.url);
   const url = new URL(backendUrl("/api/anomalies/stream"));
   const after = incoming.searchParams.get("after");

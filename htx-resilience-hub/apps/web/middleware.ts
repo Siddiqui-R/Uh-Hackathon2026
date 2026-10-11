@@ -6,9 +6,7 @@ const featurePaths = new Set(["/places", "/routines", "/recommendations", "/moni
 export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
   const feature = featurePaths.has(path);
-  if (process.env.NOACH_DEMO_MODE === "true" || process.env.NOACH_DEMO_STORAGE === "memory") {
-    return NextResponse.next();
-  }
+  if (request.cookies.has("noach_demo")) return NextResponse.next();
   if (!feature && path !== "/login") return NextResponse.next();
 
   const token = request.cookies.get("noach_account")?.value;
