@@ -1,10 +1,19 @@
 """Activity-window regression checks using only modeled forecast fixtures."""
 import unittest
+import os
+import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
-from apps.api.models import Location, UserPrefs
+from fastapi.testclient import TestClient
+from pydantic import ValidationError
+
+from apps.api.main import app
+from apps.api.models import Location, Routine, UserPrefs
 from apps.api.recommendations import build_recommendations, next_activity
+from apps.api.store import DEMO_PREFS, get_prefs, save_prefs
 from apps.api.workers import alert_candidates
 
 UTC = timezone.utc
@@ -37,6 +46,73 @@ def forecast():
 
 
 class PlannerRecommendationTests(unittest.TestCase):
+    def test_database_json_round_trip_preserves_planner_fields(self):
+        profile = UserPrefs(user_id="acct:planner-test", locations=[PLACE], routines=[
+            Routine(id="walk", activity="Walk", location_id="park", local_time="10:00",
+                    start_date="2026-10-10", recurrence="none", duration_minutes=120,
+                    alerts_enabled=False)
+        ])
+        record = {}
+
+        class Connection:
+            async def execute(self, sql, params):
+                if sql.startswith("INSERT INTO user_prefs"):
+                    record["preferences"] = params[-1].obj
+                return self
+
+            async def fetchone(self):
+                return {"preferences": record["preferences"]}
+
+        @asynccontextmanager
+        async def connection():
+            yield Connection()
+
+        async def round_trip():
+            self.assertEqual(await save_prefs(profile), "database")
+            return await get_prefs(profile.user_id)
+
+        with patch.dict(os.environ, {"NOACH_DEMO_MODE": "false"}), patch("apps.api.store.connection", connection):
+            restored, storage = asyncio.run(round_trip())
+        self.assertEqual(storage, "database")
+        self.assertEqual(restored.model_dump(mode="json"), profile.model_dump(mode="json"))
+
+    def test_planner_fields_round_trip_through_preferences_api(self):
+        payload = UserPrefs(user_id="planner-test", locations=[PLACE], routines=[
+            Routine(id="walk", activity="Walk", location_id="park", local_time="10:00",
+                    start_date="2026-10-10", recurrence="none", duration_minutes=120,
+                    alerts_enabled=False)
+        ]).model_dump(mode="json")
+        with patch.dict(os.environ, {"NOACH_DEMO_MODE": "true", "NOACH_DEMO_STORAGE": "memory",
+                                  "NOACH_ENV": "development", "INTERNAL_API_TOKEN": ""}), \
+             patch("apps.api.main.memory_sync", new=AsyncMock(return_value="disabled")):
+            DEMO_PREFS.pop("planner-test", None)
+            try:
+                with TestClient(app) as client:
+                    saved = client.post("/api/prefs", json=payload)
+                    self.assertEqual(saved.status_code, 200)
+                    self.assertEqual(saved.json()["preferences"]["routines"], payload["routines"])
+                    loaded = client.get("/api/prefs?user_id=planner-test")
+                    self.assertEqual(loaded.status_code, 200)
+                    self.assertEqual(loaded.json()["planner_schema_version"], 2)
+                    self.assertEqual(loaded.json()["preferences"]["routines"], payload["routines"])
+                    restored = UserPrefs.model_validate(loaded.json()["preferences"])
+                    self.assertEqual(build_recommendations(restored, [forecast()], [], NOW)[0]["duration_minutes"], 120)
+                    self.assertEqual(alert_candidates(restored, [forecast()], NOW), [])
+                    restored.routines[0].alerts_enabled = True
+                    self.assertEqual({item[1]["hazard"] for item in alert_candidates(restored, [forecast()], NOW)},
+                                     {"heat", "air"})
+            finally:
+                DEMO_PREFS.pop("planner-test", None)
+
+    def test_legacy_weekly_routines_and_one_time_validation(self):
+        legacy = Routine(id="walk", activity="Walk", location_id="park", local_time="10:00")
+        self.assertIsNone(legacy.start_date)
+        self.assertEqual(legacy.recurrence, "weekly")
+        self.assertTrue(legacy.alerts_enabled)
+        self.assertEqual(legacy.duration_minutes, 60)
+        with self.assertRaises(ValidationError):
+            Routine(id="walk", activity="Walk", location_id="park", local_time="10:00", recurrence="none")
+
     def test_one_time_date_and_expiry(self):
         routine = plan()
         self.assertEqual(next_activity(routine, prefs(routine), NOW), datetime(2026, 10, 10, 15, tzinfo=UTC))

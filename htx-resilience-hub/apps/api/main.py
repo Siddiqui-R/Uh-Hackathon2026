@@ -183,7 +183,7 @@ async def preferences(request: Request, user_id: str = Query(min_length=1,max_le
     user_id = account_user_id(request,user_id)
     try:
         prefs,storage = await get_prefs(user_id)
-        return {"preferences":prefs.model_dump(mode="json"),"storage":storage}
+        return {"preferences":prefs.model_dump(mode="json"),"storage":storage,"planner_schema_version":2}
     except Exception:
         raise HTTPException(503,"Preferences unavailable; check database configuration and migrations")
 
