@@ -6,7 +6,10 @@ import AccountPanel from "@/components/AccountPanel";
 import PreferencesEditor from "@/components/PreferencesEditor";
 import ModuleCard from "@/components/ModuleCard";
 import RecommendationCard from "@/components/RecommendationCard";
+import SiteNavigation from "@/components/SiteNavigation";
+import PlanningHeader from "@/components/PlanningHeader";
 import { demoBriefing, initialPreferences } from "@/lib/demo";
+import { forecastTime, forecastNumber } from "@/lib/forecastPresentation";
 import { localTime } from "@/lib/format";
 import type { AirStation, AnomalyEvent, Briefing, EnvironmentalAlert, HazardReading, Operations, UserPrefs } from "@/lib/types";
 
@@ -47,6 +50,7 @@ export default function Workspace({ page, returnToPlanner = false }: { page: Wor
   const [briefing, setBriefing] = useState<Briefing | null>(null), [prefs, setPrefs] = useState(initialPreferences);
   const [operations, setOperations] = useState<Operations | null>(null), [error, setError] = useState("");
   const [prefsError, setPrefsError] = useState("");
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
   const [viewer, setViewer] = useState<{ mode: "account" | "demo"; email?: string; display_name?: string } | null>(null);
   const [sessionError, setSessionError] = useState("");
   const [alerts, setAlerts] = useState<EnvironmentalAlert[]>([]), [stream, setStream] = useState("Connecting");
@@ -62,7 +66,8 @@ export default function Workspace({ page, returnToPlanner = false }: { page: Wor
   const readOverrides = useRef<Map<string, string | null>>(new Map());
   const alertCacheKey = useRef<string | null>(null);
   const view = briefing;
-  const forecast = view?.forecasts[0], current = forecast?.hours[0];
+  const forecast = view?.forecasts[0];
+  const current = forecast?.hours.find((hour) => Date.parse(hour.time) <= Date.now() && Date.now() < Date.parse(hour.time) + 3_600_000);
   const gauge = featuredGauge(view?.hazards ?? []);
   const gaugeStale = gauge && Date.now() - Date.parse(gauge.time) > 3_600_000;
   const observedAir = airStations.filter((station) => station.fresh).sort((a, b) => Date.parse(b.time) - Date.parse(a.time))[0];
@@ -132,7 +137,7 @@ export default function Workspace({ page, returnToPlanner = false }: { page: Wor
           if (!cancelled) {
             const next = session.mode === "demo" && !payload.preferences.locations.length
               ? { ...initialPreferences, user_id: payload.preferences.user_id } : payload.preferences;
-            setPrefs(next); setVoice(next.voice_enabled ?? false);
+            setPrefs(next); setPrefsLoaded(true); setVoice(next.voice_enabled ?? false);
             voiceRef.current = next.voice_enabled ?? false;
             notifyRef.current = next.notifications_enabled ?? false;
           }
@@ -249,14 +254,12 @@ export default function Workspace({ page, returnToPlanner = false }: { page: Wor
     finally { setDemoBusy(false); }
   }
 
-  return <div className="app-shell">
-    <header className="site-header"><a href="/" className="wordmark"><span className="brand-icon">✳</span> Noach</a>
-      <nav aria-label="Main navigation">{navigation.map((item) => <a key={item.page} href={item.href} aria-current={page === item.page ? "page" : undefined}>{item.label}{item.page === "dashboard" && unreadCount > 0 ? <span className="nav-count" aria-label={`${unreadCount} unread alerts`}>{unreadCount}</span> : null}</a>)}</nav>
-      <span className="account-status">{viewer?.mode === "account" ? <><span>{viewer.display_name ?? viewer.email}</span><button className="quiet" onClick={() => void logout()}>Log out</button></> : <span>Checking sign-in…</span>}</span>
-    </header>
-    <main>
+  return <div className={`app-shell${page === "places" ? " planning-workspace" : ""}`}>
+    <SiteNavigation path={navigation.find((item) => item.page === page)?.href ?? "/"} unreadCount={unreadCount}
+      account={<span className="account-status">{viewer?.mode === "account" ? <><span>{viewer.display_name ?? viewer.email}</span><button className="quiet" onClick={() => void logout()}>Log out</button></> : <span>Checking sign-in…</span>}</span>} />
+    <main id="main-content" tabIndex={-1}>
       {sessionError ? <section className="panel signed-out"><h1>Sign in again</h1><p className="muted">{sessionError}</p><div className="hero-actions"><a className="primary" href={`/login?next=${encodeURIComponent(navigation.find((item) => item.page === page)?.href ?? "/")}`}>Sign in</a></div></section> : <>
-      {page === "dashboard" ? <section className="hero" id="today"><div><p className="section-label">ENVIRONMENTAL INTELLIGENCE FOR HOUSTON</p><h1>Know what’s changing.<br /><em>Plan around it.</em></h1><p className="hero-copy">Weather, air and bayou conditions in one place. Get a grounded answer for your plans and a heads-up when a nearby reading changes.</p><div className="hero-actions"><a className="primary" href="/routines">Plan an activity ↗</a><a className="secondary" href="/monitor">Explore live monitor</a></div></div><div className="hero-stamp"><span className="stamp-symbol" aria-hidden>◎</span><span>LOCAL SIGNALS<br />BETTER DECISIONS</span></div></section> :
+      {page === "dashboard" ? <section className="hero" id="today"><div><p className="section-label">ENVIRONMENTAL INTELLIGENCE FOR HOUSTON</p><h1>Know what’s changing.<br /><em>Plan around it.</em></h1><p className="hero-copy">Weather, air and bayou conditions in one place. Get a grounded answer for your plans and a heads-up when a nearby reading changes.</p><div className="hero-actions"><a className="primary" href="/routines">Plan an activity ↗</a><a className="secondary" href="/monitor">Explore live monitor</a></div></div><div className="hero-stamp"><span className="stamp-symbol" aria-hidden>◎</span><span>LOCAL SIGNALS<br />BETTER DECISIONS</span></div></section> : page === "places" ? <PlanningHeader step="places" prefs={prefsLoaded ? prefs : null} /> :
         <section className="page-intro"><p className="section-label">NOACH / HOUSTON</p><h1>{navigation.find((item) => item.page === page)?.label}</h1><p className="muted">{pageDescriptions[page]}</p></section>}
       {viewer?.mode === "demo" && <div className="demo-banner">You are exploring with a browser demo. <a href="/signup">Create an account</a> to save your plan across devices.</div>}
       {!viewer && <p className="muted" role="status">Loading your plan…</p>}
@@ -266,29 +269,31 @@ export default function Workspace({ page, returnToPlanner = false }: { page: Wor
       {temporary && <div className="notice">Local rehearsal: saved plans, simulated events and alerts are temporary and reset when the API restarts. Weather and AQI are live modeled forecasts only when labeled as such.</div>}
       {(page === "dashboard" || page === "recommendations") && <section className="conditions" aria-label="Current environmental conditions"><div className="section-heading"><div><p className="section-label">01 / THE CURRENT PICTURE</p><h2>Houston at a glance</h2></div><span className="tiny">Forecasts and observations are labeled separately</span></div>
         <div className="module-grid">
-          <ModuleCard title="Temperature" value={current?.temperature_2m !== undefined ? Math.round(current.temperature_2m) + "°F" : "Unavailable"} status={view?.source_status.weather ?? "connecting"} caption={forecast ? `${forecast.location.name} · ${demo ? "illustrative preview" : "Open-Meteo forecast"} · ${localTime(forecast.retrieved_at)}` : "Awaiting forecast"} />
-          <ModuleCard title="Air quality" value={observedAir ? observedAir.value.toFixed(1) + " µg/m³" : current?.us_aqi !== undefined ? Math.round(current.us_aqi) + " US AQI" : "Unavailable"} status={observedAir ? "observed PM2.5" : view?.source_status.air ?? "connecting"} caption={observedAir ? `${observedAir.station_name} · AirNow · ${localTime(observedAir.time)}` : demo ? "Illustrative preview · not a live AQI" : "Modeled AQI forecast · CAMS / Open-Meteo"} accent="orange" />
-          <ModuleCard title="Bayou gauge" value={gauge ? gauge.value.toFixed(2) + " ft" : "Unavailable"} status={gaugeStale ? "stale observation" : view?.source_status.flood ?? "connecting"} caption={gauge ? `${gauge.station_name} · ${demo ? "illustrative preview" : "USGS observed"} · stage not rated · ${localTime(gauge.time)}` : "Awaiting USGS observation"} />
+          <ModuleCard title="Temperature" value={forecastNumber(current?.temperature_2m, "°F")} status={view?.source_status.weather ?? "connecting"} caption={forecast ? `${forecast.location.name} · ${demo ? "illustrative preview" : "Open-Meteo forecast"} · retrieved ${forecastTime(forecast.retrieved_at, view?.timezone)} · valid ${forecastTime(current?.time, view?.timezone)}` : "Awaiting forecast"} />
+          <ModuleCard title="Air quality" value={observedAir ? observedAir.value.toFixed(1) + " µg/m³" : current?.us_aqi !== undefined ? Math.round(current.us_aqi) + " US AQI" : "Unavailable"} status={observedAir ? "observed PM2.5" : view?.source_status.air ?? "connecting"} caption={observedAir ? `${observedAir.station_name} · AirNow observation · ${forecastTime(observedAir.time, view?.timezone)}` : demo ? "Illustrative preview · not a live AQI" : `Modeled AQI · CAMS / Open-Meteo · retrieved ${forecastTime(forecast?.retrieved_at, view?.timezone)} · valid ${forecastTime(current?.time, view?.timezone)}`} accent="orange" />
+          <ModuleCard title="Bayou gauge" value={gauge ? gauge.value.toFixed(2) + " ft" : "Unavailable"} status={gaugeStale ? "stale observation" : view?.source_status.flood ?? "connecting"} caption={gauge ? `${gauge.station_name} · ${view?.source_status.flood === "demo" ? "simulated reading" : "USGS observation"} · stage not rated · ${forecastTime(gauge.time, view?.timezone)}` : "Awaiting USGS observation"} />
         </div>
       </section>}
+      {page === "dashboard" && current?.data_quality_notes?.length ? <div className="forecast-quality"><strong>Forecast data quality needs review</strong>{current.data_quality_notes.map((note) => <p key={note}>{note} Valid {forecastTime(current.time, view?.timezone)}.</p>)}</div> : null}
       {page === "dashboard" && <div className="feature-cards">
         <a href="/places" className="panel"><span className="section-label">01 / PLACES</span><strong>Save your places ↗</strong><span>Get conditions around where you live, study, or work.</span></a>
         <a href="/recommendations" className="panel"><span className="section-label">02 / RECOMMENDATIONS</span><strong>Plan a better hour ↗</strong><span>Compare your next routine with nearby forecast hours.</span></a>
         <a href="/assistant" className="panel"><span className="section-label">03 / ASSISTANT</span><strong>Ask a question ↗</strong><span>Get grounded guidance for your plans.</span></a>
       </div>}
       {page === "assistant" && <div className="assistant-page"><AskBox /></div>}
-      {page === "recommendations" && <section className="panel briefing-panel"><div className="panel-heading"><div><p className="section-label">YOUR OUTDOOR PLAN</p><h2>A clearer time to go</h2></div><span className="brief-icon" aria-hidden>☀</span></div>
-          <div className="weather-strip"><div><span className="big-number">{current?.temperature_2m !== undefined ? Math.round(current.temperature_2m) + "°" : "—"}</span><span className="tiny">{forecast?.location.name ?? "Houston"} · {demo ? "illustrative preview" : "model forecast"}</span></div><div><strong>{current?.apparent_temperature !== undefined ? Math.round(current.apparent_temperature) + "°F" : "—"}</strong><span className="tiny">Feels like</span></div><div><strong>{current?.us_aqi !== undefined ? Math.round(current.us_aqi) : "—"}</strong><span className="tiny">{demo ? "Demo US AQI" : "Modeled US AQI"}</span></div></div>
+      {page === "recommendations" && <section className="panel briefing-panel"><div className="panel-heading"><div><p className="section-label">YOUR OUTDOOR PLAN</p><h2>A clearer time to go</h2></div><span className="tag">Modeled forecast</span></div>
+          <div className="weather-strip"><div><span className="big-number">{current?.temperature_2m !== undefined ? Math.round(current.temperature_2m) + "°F" : "—"}</span><span className="tiny">{forecast?.location.name ?? "Houston"} · {demo ? "illustrative preview" : "model forecast"}</span></div><div><strong>{current?.apparent_temperature !== undefined ? Math.round(current.apparent_temperature) + "°F" : "—"}</strong><span className="tiny">Feels like</span></div><div><strong>{current?.us_aqi !== undefined ? Math.round(current.us_aqi) : "—"}</strong><span className="tiny">{demo ? "Demo US AQI" : "Modeled US AQI"}</span></div></div>
           {!view && <p className="muted">Gathering environmental context…</p>}
           <div className="recommendations">{view?.recommendations.length ? view.recommendations.map((card) => <RecommendationCard key={card.id} card={card} timezone={view.timezone} />) : view ? <p className="empty-events">No routine recommendations yet. <a href="/routines">Add a routine</a> to personalize this page.</p> : null}</div>
           <button className="secondary listen-button" disabled={!voice || audioBusy || !view} onClick={() => void play((demo ? "Demonstration briefing. " : "") + (view?.recommendations.map((r) => r.title + ". " + r.reason).join(" ") ?? ""))}>{audioBusy ? "Preparing audio…" : "◖ Listen to my briefing"}</button>
           <p className="tiny">{view ? "Updated " + localTime(view.generated_at, view.timezone) : "Waiting for data"} · <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Open-Meteo</a> / <a href="https://atmosphere.copernicus.eu/" target="_blank" rel="noreferrer">CAMS</a></p>
         </section>}
-      {page === "places" && <div className="settings-anchor"><PreferencesEditor value={prefs} onSave={save} section="places" />
+      {page === "places" && prefsLoaded && <div className="settings-anchor"><PreferencesEditor value={prefs} onSave={save} section="places" />
         {returnToPlanner && <p className="notice"><a href="/routines">← Back to the activity planner</a> after saving your place.</p>}</div>}
       {page === "routines" && <div className="settings-anchor"><PreferencesEditor value={prefs} onSave={save} section="routines" /></div>}
-      {page === "places" && <section id="map" className="map-section"><div className="section-heading"><div><p className="section-label">CONDITIONS BY PLACE</p><h2>Check any spot in Houston.</h2></div><span className="tiny">Air quality, heat, rain, bayou gauges and the power grid, with advice that follows where you tap</span></div>
-        <ConditionsMap readings={view?.hazards ?? []} prefs={prefs} grid={grid} />
+      {page === "places" && !prefsLoaded && <p className="tiny" role="status">{prefsError ? "Saved places unavailable. Try reloading." : "Loading saved places…"}</p>}
+      {page === "places" && prefsLoaded && <section id="map" className="map-section"><div className="section-heading"><div><p className="section-label">FIELD MAP / HOUSTON</p><h2>Explore conditions</h2></div><span className="tiny">Select a place or drop a pin.</span></div>
+        <ConditionsMap readings={view?.hazards ?? []} prefs={prefs} grid={grid} gaugeMode={view?.source_status.flood} />
       </section>}
       {page === "monitor" && <section id="monitor" className="monitor-section"><div className="section-heading"><div><p className="section-label">WATCHING FOR CHANGE</p><h2>Live environmental monitor</h2></div><span className="tag"><span className="live-dot" /> {monitorStatus}</span></div>
         <div className="monitor-grid"><div className="panel monitor-map"><HazardMap readings={view?.hazards ?? []} locations={prefs.locations} anomalies={anomalies} airStations={airStations} /><Sparkline points={history} /><p className="tiny">{view?.coverage}</p></div>

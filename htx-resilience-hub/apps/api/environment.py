@@ -8,6 +8,7 @@ import httpx
 from .db import connection
 from .models import Location
 from .store import demo_mode, temporary_storage
+from .forecast_quality import TEMPERATURES, temperature_f, quality_notes
 
 UTC = timezone.utc
 UH = Location(id="uh",name="University of Houston",kind="school",lat=29.7199,lon=-95.3422)
@@ -64,6 +65,7 @@ async def forecast(location: Location, force: bool = False) -> dict[str, Any]:
             return_exceptions=True)
     hours: dict[str, dict[str, Any]] = {}
     statuses: dict[str,str] = {}
+    sources: dict[str, Any] = {}
     metrics = [("weather",["temperature_2m","relative_humidity_2m","apparent_temperature","precipitation_probability"]), ("air",["us_aqi","pm2_5"])]
     for result,(source,names) in zip(responses,metrics):
         if isinstance(result,BaseException):
@@ -71,20 +73,40 @@ async def forecast(location: Location, force: bool = False) -> dict[str, Any]:
             continue
         try:
             result.raise_for_status()
-            hourly = result.json()["hourly"]
+            payload = result.json()
+            hourly = payload["hourly"]
+            units = payload.get("hourly_units", {})
+            sources[source] = {"name": "Open-Meteo weather" if source == "weather" else "CAMS / Open-Meteo air quality",
+                "url": "https://open-meteo.com/en/docs" if source == "weather" else "https://open-meteo.com/en/docs/air-quality-api",
+                "retrieved_at": now.isoformat(), "provider_units": units,
+                "latitude": payload.get("latitude"), "longitude": payload.get("longitude")}
             for index, timestamp in enumerate(hourly["time"]):
-                at = datetime.fromisoformat(timestamp).replace(tzinfo=UTC)
+                at = datetime.fromisoformat(timestamp)
+                at = at.replace(tzinfo=UTC) if at.tzinfo is None else at.astimezone(UTC)
                 if at < now.replace(minute=0,second=0,microsecond=0):
                     continue
                 entry = hours.setdefault(at.isoformat(), {"time":at.isoformat()})
                 for metric in names:
-                    value = hourly.get(metric,[])[index]
-                    if value is not None and math.isfinite(float(value)):
+                    series = hourly.get(metric) or []
+                    value = series[index] if index < len(series) else None
+                    if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value):
+                        continue
+                    if metric in TEMPERATURES:
+                        entry.setdefault("source_values", {})[metric] = {"value": value, "unit": units.get(metric)}
+                        normalized = temperature_f(value, units.get(metric))
+                        if normalized is None:
+                            label = "temperature" if metric == "temperature_2m" else "feels-like temperature"
+                            entry.setdefault("data_quality_notes", []).append(f"Open-Meteo {label}: raw value {value:g}, unit {units.get(metric) or 'not supplied'}. Fahrenheit could not be verified.")
+                            continue
+                        entry[metric] = normalized
+                    else:
                         entry[metric] = float(value)
             statuses[source] = "live model"
         except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError):
             statuses[source] = "unavailable"
-    snapshot = {"location":location.model_dump(),"retrieved_at":now.isoformat(),"hours":sorted(hours.values(),key=lambda h:h["time"]),
+    for hour in hours.values():
+        hour["data_quality_notes"] = quality_notes(hour, location.lat, location.lon)
+    snapshot = {"location":location.model_dump(),"retrieved_at":now.isoformat(),"hours":sorted(hours.values(),key=lambda h:h["time"]), "sources": sources,
                 "source_status":statuses,"attribution":"Weather: Open-Meteo. Air quality: CAMS / Open-Meteo modeled forecasts, not a local sensor.",
                 "source_url":"https://open-meteo.com/en/docs/air-quality-api","storage":"unavailable"}
     if any(s == "live model" for s in statuses.values()):

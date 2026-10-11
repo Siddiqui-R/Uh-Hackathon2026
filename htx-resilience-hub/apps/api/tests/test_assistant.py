@@ -221,7 +221,7 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_area_retries_and_does_not_hide_a_failed_layer(self) -> None:
         def ok(names: list[str]) -> MagicMock:
-            response = MagicMock(); response.json.return_value = [{"current":{n:50 for n in names}} for _ in range(49)]
+            response = MagicMock(); response.json.return_value = [{"current":{n:50 for n in names}, "current_units":{"apparent_temperature":"°F"}} for _ in range(49)]
             return response
         calls = {"air":0,"weather":0}
         async def get(url: str, params: dict) -> MagicMock:

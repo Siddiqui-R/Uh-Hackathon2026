@@ -4,6 +4,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 from .environment import UH, distance, fresh
 from .models import UserPrefs, Routine
+from .forecast_quality import quality_notes
 
 SOURCES = {"heat":"https://www.weather.gov/safety/heat", "air":"https://www.airnow.gov/aqi/aqi-basics/using-air-quality-index/",
            "flood":"https://www.weather.gov/safety/flood", "grid":"https://www.ercot.com/txans"}
@@ -60,7 +61,9 @@ def conditions(hour: dict[str, Any] | None) -> dict[str, Any] | None:
             "feels_like_f": hour.get("apparent_temperature"),
             "us_aqi": hour.get("us_aqi"),
             "pm25_ug_m3": hour.get("pm2_5"),
-            "precipitation_probability": hour.get("precipitation_probability")}
+            "precipitation_probability": hour.get("precipitation_probability"),
+            "data_quality_notes": hour.get("data_quality_notes", []),
+            "source_values": hour.get("source_values", {})}
 
 def comparable(candidate: dict[str, Any], categories: list[str]) -> bool:
     """A suggested hour must contain the measurements behind each triggered risk."""
@@ -110,18 +113,20 @@ def build_recommendations(prefs: UserPrefs, forecasts: list[dict[str,Any]], floo
         hour = hour_for(snapshot["hours"],at) if snapshot else None
         duration = getattr(routine, "duration_minutes", None)
         period = hours_for_duration(snapshot["hours"], at, duration) if snapshot and duration else ([hour] if hour else None)
+        quality = [{"forecast_hour": h["time"], "note": note} for h in period or ([hour] if hour else [])
+                   for note in quality_notes(h, location.lat, location.lon)]
         has_evidence = bool(period and all(h.get("apparent_temperature") is not None or h.get("us_aqi") is not None for h in period))
         complete = bool(snapshot and fresh(snapshot["retrieved_at"],now) and has_evidence)
         categories = sorted({category for h in period or [] for category in risks(h,prefs)}) if complete else []
         alternative = None
         alternative_hour = None
-        if categories and snapshot:
+        if categories and snapshot and not quality:
             for candidate in snapshot["hours"]:
                 stamp = datetime.fromisoformat(candidate["time"])
                 local_hour = stamp.astimezone(ZoneInfo(prefs.timezone)).hour
                 candidate_period = hours_for_duration(snapshot["hours"], stamp, duration) if duration else [candidate]
                 if (at < stamp <= at+timedelta(hours=12) and 6 <= local_hour < 21
-                    and candidate_period and all(comparable(h,categories) and not risks(h,prefs)
+                    and candidate_period and all(not quality_notes(h, location.lat, location.lon) and comparable(h,categories) and not risks(h,prefs)
                                                  and (h.get("precipitation_probability") is None or h["precipitation_probability"] <= 50)
                                                  for h in candidate_period)):
                     alternative = stamp.isoformat()
@@ -139,13 +144,29 @@ def build_recommendations(prefs: UserPrefs, forecasts: list[dict[str,Any]], floo
             reason = prefix + "; ".join(values) + ". " + ("Your selected thresholds are exceeded." if categories else "Your selected thresholds are not exceeded; this is not a safety guarantee.")
         else:
             reason = "Forecast coverage is incomplete or stale. Check official conditions before deciding."
+        if quality:
+            reason = "The provider returned forecast values that need a data-quality review. Values are shown as reported, with declared Celsius values converted to Fahrenheit. No time change is suggested from this evidence."
+        threshold_checks = []
+        if complete and not quality:
+            for metric, label, unit, threshold, comparison in [
+                ("apparent_temperature", "Feels like", "°F", prefs.thresholds.get("feels_like_f",95), ">="),
+                ("us_aqi", "Modeled US AQI", "US AQI", prefs.thresholds.get("us_aqi",100), ">")]:
+                values = [h[metric] for h in period or [] if h.get(metric) is not None]
+                if values:
+                    peak = max(values)
+                    threshold_checks.append({"metric":metric,"label":label,"value":peak,"unit":unit,"threshold":threshold,
+                                             "comparison":comparison,"exceeded":peak >= threshold if comparison == ">=" else peak > threshold})
         cards.append({"id":routine.id,"title":routine.activity,"location":location.name,"time":at.isoformat(),
-          "category":"outdoor","status":"unavailable" if not complete else "consider alternatives" if categories else "review conditions",
+          "category":"outdoor","status":"data quality review" if quality else "unavailable" if not complete else "consider alternatives" if categories else "review conditions",
           "reason":reason,"alternative_time":alternative,
-          "original_conditions":conditions(hour) if complete else None,
+          "original_conditions":conditions(hour),
           "alternative_conditions":conditions(alternative_hour),
           "forecast_retrieved_at":snapshot["retrieved_at"] if snapshot else None,
           "forecast_attribution":snapshot.get("attribution") if snapshot else None,
+          "forecast_sources":snapshot.get("sources", {}) if snapshot else {},
+          "data_quality":quality,
+          "threshold_checks":threshold_checks,
+          "location_coordinates":{"lat":location.lat,"lon":location.lon},
           "duration_minutes":duration,
           "forecast_status":"missing" if not snapshot else "stale" if not fresh(snapshot["retrieved_at"],now) else "incomplete" if not has_evidence else "current",
           "suggestions":[s for c in categories for s in suggestions(c)] or suggestions("air"),"demo":False})

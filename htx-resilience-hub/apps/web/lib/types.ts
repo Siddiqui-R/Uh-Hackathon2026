@@ -15,23 +15,36 @@ export interface UserPrefs {
   notifications_enabled: boolean; voice_enabled: boolean;
 }
 export interface Suggestion { title: string; description: string; source_url: string; }
+export interface ForecastSource {
+  name: string; url: string; retrieved_at: string; provider_units: Record<string, string>;
+  latitude?: number; longitude?: number;
+}
 export interface ActivityConditions {
   forecast_hour: string; temperature_f: number | null; feels_like_f: number | null;
   us_aqi: number | null; pm25_ug_m3: number | null; precipitation_probability: number | null;
+  data_quality_notes?: string[];
+  source_values?: Record<string, { value: number; unit: string | null }>;
 }
 export interface Recommendation {
   id: string; title: string; location: string; time: string; category: string; status: string;
   reason: string; alternative_time: string | null; suggestions: Suggestion[]; demo: boolean;
   original_conditions?: ActivityConditions | null; alternative_conditions?: ActivityConditions | null;
   forecast_retrieved_at?: string | null; forecast_attribution?: string | null;
+  duration_minutes?: number | null; forecast_status?: string;
+  forecast_sources?: Record<string, ForecastSource>;
+  data_quality?: { forecast_hour: string; note: string }[];
+  location_coordinates?: { lat: number; lon: number };
+  threshold_checks?: { metric: string; label: string; value: number; unit: string; threshold: number; comparison: string; exceeded: boolean }[];
 }
 export interface ForecastHour {
   time: string; temperature_2m?: number; relative_humidity_2m?: number; apparent_temperature?: number;
   precipitation_probability?: number; us_aqi?: number; pm2_5?: number;
+  data_quality_notes?: string[];
 }
 export interface Forecast {
   location: Location; retrieved_at: string; hours: ForecastHour[]; source_status: Record<string,string>;
   attribution: string; source_url: string; storage: string;
+  sources?: Record<string, ForecastSource>;
 }
 export interface GridStatus {
   status: "live" | "unavailable" | "demo"; severity: Severity | null; title: string; note: string;
@@ -40,6 +53,8 @@ export interface GridStatus {
 export interface AreaCell {
   lat: number; lon: number; us_aqi?: number; pm2_5?: number; ozone?: number;
   apparent_temperature?: number; precipitation_probability?: number;
+  valid_at?: Record<string, string>; data_quality_notes?: string[];
+  source_values?: Record<string, { value: number; unit: string | null }>;
 }
 export interface AreaConditions {
   generated_at: string; bounds: { south: number; north: number; west: number; east: number };
@@ -48,6 +63,7 @@ export interface AreaConditions {
 export interface PlaceMatch { name: string; address: string; lat: number; lon: number; }
 export interface PointConditions {
   generated_at: string; timezone: string; location: Location; current: ForecastHour;
+  forecast_retrieved_at?: string; forecast_attribution?: string;
   nearby_gauges: (HazardReading & { distance_km: number })[]; grid: GridStatus;
   recommendations: Recommendation[]; source_status: Record<string,string>; coverage: string;
 }

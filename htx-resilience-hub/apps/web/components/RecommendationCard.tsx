@@ -1,12 +1,15 @@
-import { localTime } from "@/lib/format";
 import ActivityComparison from "@/components/ActivityComparison";
 import type { Recommendation } from "@/lib/types";
+import { forecastTime } from "@/lib/forecastPresentation";
+import { outlookStatus, outlookQuality } from "@/lib/outlookPresentation";
 
 export default function RecommendationCard({ card, timezone }: { card: Recommendation; timezone: string }) {
-  return <article className="recommendation">
-    <div className="recommendation-heading"><strong>{card.title}</strong><span className="tag">{card.demo ? "DEMO" : card.status}</span></div>
-    <p className="tiny">{card.location} · {localTime(card.time, timezone)}</p><p>{card.reason}</p>
-    {card.category === "outdoor" ? <ActivityComparison card={card} timezone={timezone} /> : card.alternative_time && <p className="alternative">Consider {localTime(card.alternative_time, timezone)} instead. Check conditions again before heading out.</p>}
-    <div className="action-links">{card.suggestions.map((suggestion) => <a key={suggestion.title} href={suggestion.source_url} target="_blank" rel="noreferrer">{suggestion.title} ↗</a>)}</div>
+  const outdoor = card.category === "outdoor";
+  const review = outlookQuality(card).length > 0;
+  return <article className={`recommendation${review ? " recommendation-review" : ""}`} id={`activity-${card.id}`}>
+    <div className="recommendation-heading"><div><p className="recommendation-kind">{card.demo ? "Illustrative demo" : outdoor ? "Modeled forecast" : card.category === "commute" ? "USGS observation" : "ERCOT report"}</p><h3>{card.title}</h3></div><span className={`tag${review || card.status === "consider alternatives" ? " tag-review" : ""}`}>{outlookStatus(card)}</span></div>
+    <div className="activity-meta"><span>⌖ {card.location}</span><time dateTime={card.time}>{forecastTime(card.time, timezone)}</time>{card.duration_minutes ? <span>{card.duration_minutes} min</span> : null}</div>
+    {outdoor ? <ActivityComparison card={card} timezone={timezone} /> : <details className="outlook-context"><summary>Why this? / source guidance</summary><p>{card.reason}</p><div className="action-links">{card.suggestions.map((suggestion) => <a href={suggestion.source_url} key={suggestion.title} target="_blank" rel="noreferrer">{suggestion.title} ↗</a>)}</div></details>}
+    {outdoor && !card.demo && <div className="outlook-card-next"><a href={card.id === "daily" ? "/routines" : `/routines?activity=${encodeURIComponent(card.id)}`}>{card.id === "daily" ? "Plan an activity" : "Edit activity"} ↗</a></div>}
   </article>;
 }

@@ -6,6 +6,6 @@ export default function RoutinesPage({ searchParams }: { searchParams?: Record<s
   const candidate = typeof searchParams?.continue === "string" ? searchParams.continue : undefined;
   const continuePath = safeReturnTo(candidate);
   return <ProtectedPage path="/routines" searchParams={searchParams}>
-    <ActivityPlanner onboarding={welcome} continuePath={continuePath.startsWith("/routines") ? "/" : continuePath} />
+    <ActivityPlanner placeId={typeof searchParams?.place === "string" ? searchParams.place : undefined} activityId={typeof searchParams?.activity === "string" ? searchParams.activity : undefined} onboarding={welcome} continuePath={continuePath.startsWith("/routines") ? "/" : continuePath} />
   </ProtectedPage>;
 }

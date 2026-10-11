@@ -21,7 +21,7 @@ function todayIn(zone: string): string {
 function timeIn(zone: string): string {
   return new Intl.DateTimeFormat("en-GB", { timeZone: zone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date());
 }
-function newActivity(prefs: UserPrefs): PlannedRoutine {
+function newActivity(prefs: UserPrefs, placeId?: string): PlannedRoutine {
   let startDate = todayIn(prefs.timezone);
   if (timeIn(prefs.timezone) >= "17:00") {
     const tomorrow = new Date(`${startDate}T12:00:00Z`);
@@ -29,7 +29,7 @@ function newActivity(prefs: UserPrefs): PlannedRoutine {
     startDate = tomorrow.toISOString().slice(0, 10);
   }
   const weekday = (new Date(`${startDate}T12:00:00Z`).getUTCDay() + 6) % 7;
-  return { id: crypto.randomUUID(), activity: "", location_id: prefs.locations[0]?.id ?? "",
+  return { id: crypto.randomUUID(), activity: "", location_id: prefs.locations.find((place) => place.id === placeId)?.id ?? prefs.locations[0]?.id ?? "",
     start_date: startDate, local_time: "17:00", duration_minutes: 60,
     recurrence: "none", weekdays: [weekday], alerts_enabled: true };
 }
@@ -50,7 +50,7 @@ function summary(routine: PlannedRoutine, prefs: UserPrefs): string {
   return `${routine.activity.trim() || "Your activity"} at ${place}, ${schedule} at ${timeLabel(routine.local_time)}, for ${routine.duration_minutes ?? 60} minutes.`;
 }
 
-export default function ActivityPlanner({ onboarding = false, continuePath = "/" }: { onboarding?: boolean; continuePath?: string }) {
+export default function ActivityPlanner({ onboarding = false, continuePath = "/", placeId, activityId }: { onboarding?: boolean; continuePath?: string; placeId?: string; activityId?: string }) {
   const [prefs, setPrefs] = useState<UserPrefs | null>(null);
   const [draft, setDraft] = useState<PlannedRoutine | null>(null);
   const [loading, setLoading] = useState(true);
@@ -68,7 +68,10 @@ export default function ActivityPlanner({ onboarding = false, continuePath = "/"
       setPrefs(data.preferences);
       const ready = (data.planner_schema_version ?? 0) >= 2;
       setSchemaReady(ready);
-      if (onboarding && ready && data.preferences.locations.length && !data.preferences.routines.length) setDraft(newActivity(data.preferences));
+      const selected = data.preferences.routines.find((activity) => activity.id === activityId);
+      if (ready && selected) setDraft({ ...selected });
+      else if (ready && placeId && data.preferences.locations.some((place) => place.id === placeId)) setDraft(newActivity(data.preferences, placeId));
+      if (onboarding && ready && data.preferences.locations.length && !data.preferences.routines.length) setDraft(newActivity(data.preferences, placeId));
     } catch (failure) { setError(failure instanceof Error ? failure.message : "Activities unavailable."); }
     finally { setLoading(false); }
   }
@@ -122,7 +125,7 @@ export default function ActivityPlanner({ onboarding = false, continuePath = "/"
         throw new Error("The server did not retain every activity detail. Reload before relying on this plan.");
       }
       setPrefs(persisted); setDraft(null);
-      setMessage(`${updated.activity} saved. Its next forecast comparison is on Recommendations.`);
+      setMessage(`${updated.activity} saved. Check its scheduled time on Outlook.`);
     } catch (failure) { setError(failure instanceof Error ? failure.message : "Save failed."); }
     finally { setSaving(false); }
   }
@@ -149,7 +152,7 @@ export default function ActivityPlanner({ onboarding = false, continuePath = "/"
   }
 
   return <FeatureFrame path="/routines" eyebrow="YOUR OUTDOOR PLANS" title="Activity planner"
-    description="Set a time and place for an outing. Noach compares that plan with available weather and modeled air-quality forecasts.">
+    description="Choose a place and a schedule." planningPrefs={prefs}>
     <div className={styles.stack}>
       {loading && <div className={styles.loading} role="status">Loading your activities…</div>}
       {error && <div className={styles.error} role="alert">{error} {!prefs && !loading && <button className={styles.quiet} onClick={() => void load()}>Try again</button>}</div>}
@@ -161,55 +164,54 @@ export default function ActivityPlanner({ onboarding = false, continuePath = "/"
         </section>}
         {!schemaReady && <p className={styles.notice} role="status">Your saved activities are visible, but editing is temporarily unavailable until the planner API supports all activity details.</p>}
         <section className={styles.panel} aria-label="Your planned activities">
-          <div className={styles.between}><div><p className="section-label">YOUR PLAN</p><h2>Planned activities</h2>
-            <p className={styles.muted}>All times are in {prefs.timezone}. Save up to 10 activities.</p></div>
+          <div className={styles.between}><div><p className="section-label">ACTIVITY BOOK</p><h2>Your plans</h2>
+            <p className={styles.muted}>{prefs.timezone} · {prefs.routines.length}/10 activities</p></div>
             {!draft && schemaReady && !!prefs.locations.length && prefs.routines.length < 10 &&
-              <button className={styles.button} onClick={() => { setDraft(newActivity(prefs)); setMessage(""); }}>+ Plan an activity</button>}
+              <button className={styles.button} onClick={() => { setDraft(newActivity(prefs, placeId)); setMessage(""); }}>+ Plan an activity</button>}
           </div>
           {!prefs.locations.length && <div className={styles.plannerEmpty}><h3>First, save a place</h3><p>Choose where you want to go so Noach can use the forecast for that area.</p>
             <a className={styles.button} href="/places?from=planner">Add a saved place ↗</a></div>}
           {!!prefs.locations.length && !prefs.routines.length && !draft && <div className={styles.plannerEmpty}><h3>No activities planned yet</h3>
             <p>Start with something you enjoy outdoors. You can change the details any time.</p>
-            {schemaReady && <button className={styles.button} onClick={() => setDraft(newActivity(prefs))}>Plan your first activity</button>}</div>}
-          {!!prefs.routines.length && <div className={styles.activityList}>{prefs.routines.map((item) => {
+            {schemaReady && <button className={styles.button} onClick={() => setDraft(newActivity(prefs, placeId))}>Plan your first activity</button>}</div>}
+          {!!prefs.routines.length && <div className={styles.planList}>{prefs.routines.map((item) => {
             const activity = item as PlannedRoutine;
             return <article className={styles.activityItem} key={item.id}><div><h3>{item.activity}</h3>
-              <p>{summary(activity, prefs)}</p><span className={styles.small}>{activity.alerts_enabled === false ? "Forecast alerts off" : "Forecast alerts on"}</span></div>
-              <div className={styles.activityActions}>{schemaReady && <button className={styles.quiet} disabled={saving || !!draft} onClick={() => { setDraft({ ...activity }); setMessage(""); }}>Edit</button>}
+              <p className={styles.placeLine}>⌖ {prefs.locations.find((place) => place.id === item.location_id)?.name ?? "Saved place unavailable"}</p><p className={styles.scheduleLine}>{activity.recurrence === "none" ? dateLabel(activity.start_date) : activity.weekdays.map((day) => days[day].slice(0, 3)).join(" · ")} / {timeLabel(activity.local_time)} / {activity.duration_minutes ?? 60} min</p><span className={styles.small}>{activity.alerts_enabled === false ? "Forecast alerts off" : "Forecast alerts on"}</span></div>
+              <div className={styles.activityActions}><a className={styles.inlineLink} href={`/recommendations#activity-${item.id}`}>Outlook ↗</a>{schemaReady && <button className={styles.quiet} disabled={saving || !!draft} onClick={() => { setDraft({ ...activity }); setMessage(""); }}>Edit</button>}
                 {schemaReady && <button className={styles.quiet} disabled={saving || !!draft} onClick={() => void remove(activity)}>Remove</button>}</div></article>;
           })}</div>}
-          {message && <div className={styles.notice} role="status">{message} <a className={styles.inlineLink} href="/recommendations">View recommendations ↗</a></div>}
+          {message && <div className={styles.notice} role="status">{message} <a className={styles.inlineLink} href="/recommendations">View outlook ↗</a></div>}
+        <div className={styles.planningNext}><a className={styles.inlineLink} href="/places?from=planner">+ Add a place</a><a className={styles.inlineLink} href="/recommendations">Check outlook →</a></div>
         </section>
 
         {draft && schemaReady && <section className={`${styles.panel} ${styles.plannerEditor}`} aria-label={prefs.routines.some((item) => item.id === draft.id) ? "Edit activity" : "New activity"}>
           <div className={styles.between}><div><p className="section-label">{prefs.routines.some((item) => item.id === draft.id) ? "EDIT YOUR PLAN" : "A NEW PLAN"}</p>
             <h2>{prefs.routines.some((item) => item.id === draft.id) ? "Edit activity" : "Plan an activity"}</h2>
-            <p className={styles.muted}>A few choices now make your recommendation more useful.</p></div>
+            </div>
             <button className={styles.quiet} disabled={saving} onClick={cancel}>Cancel</button></div>
           <form onSubmit={(event) => { event.preventDefault(); void save(); }}>
             <div className={styles.plannerQuestions}>
-              <section className={styles.plannerQuestion}><span className={styles.stepNumber}>01</span><div><h3>What do you want to do?</h3>
-                <p>Give your activity a name you’ll recognize.</p><label className={styles.field}>Activity name<input required maxLength={100} placeholder="e.g. Basketball, a walk, gardening" value={draft.activity} onChange={(event) => change({ activity: event.target.value })} /></label></div></section>
-              <section className={styles.plannerQuestion}><span className={styles.stepNumber}>02</span><div><h3>Where will you go?</h3>
-                <p>Choose one of your saved places. <a className={styles.inlineLink} href="/places?from=planner">Add another place ↗</a></p>
+              <section className={styles.plannerQuestion}><span className={styles.stepNumber}>01</span><div><h3>Activity</h3><label className={styles.field}>Activity name<input required maxLength={100} placeholder="e.g. Basketball, a walk, gardening" value={draft.activity} onChange={(event) => change({ activity: event.target.value })} /></label></div></section>
+              <section className={styles.plannerQuestion}><span className={styles.stepNumber}>02</span><div><h3>Place</h3>
+                <p><a className={styles.inlineLink} href="/places?from=planner">Add another place ↗</a></p>
                 <label className={styles.field}>Saved place<select required value={draft.location_id} onChange={(event) => change({ location_id: event.target.value })}>{prefs.locations.map((place) => <option key={place.id} value={place.id}>{place.name}</option>)}</select></label></div></section>
-              <section className={styles.plannerQuestion}><span className={styles.stepNumber}>03</span><div><h3>When are you going?</h3>
-                <p>Choose a local date and time in {prefs.timezone}.</p><div className={styles.plannerTwoColumns}>
+              <section className={styles.plannerQuestion}><span className={styles.stepNumber}>03</span><div><h3>Schedule</h3>
+                <p>Local time / {prefs.timezone}</p><div className={styles.plannerTwoColumns}>
                   <label className={styles.field}>Start date<input required type="date" value={draft.start_date ?? ""} onChange={(event) => change({ start_date: event.target.value })} /></label>
                   <label className={styles.field}>Start time<input required type="time" value={draft.local_time} onChange={(event) => change({ local_time: event.target.value })} /></label>
                 </div></div></section>
-              <section className={styles.plannerQuestion}><span className={styles.stepNumber}>04</span><div><h3>Will this happen again?</h3>
+              <section className={styles.plannerQuestion}><span className={styles.stepNumber}>04</span><div><h3>Repeat</h3>
                 <div className={styles.choiceRow}><label className={styles.choice}><input type="radio" name="repeat" checked={draft.recurrence === "none"} onChange={() => change({ recurrence: "none" })} />Just this once</label>
                   <label className={styles.choice}><input type="radio" name="repeat" checked={draft.recurrence !== "none"} onChange={() => change({ recurrence: "weekly" })} />Repeat weekly</label></div>
                 {draft.recurrence === "weekly" && <fieldset className={styles.weekdays}><legend>Repeat on</legend><div className={styles.days}>{days.map((day, index) => <label key={day} className={styles.choice}>
                   <input type="checkbox" checked={draft.weekdays.includes(index)} onChange={() => change({ weekdays: draft.weekdays.includes(index) ? draft.weekdays.filter((value) => value !== index) : [...draft.weekdays, index].sort() })} />{day.slice(0, 3)}</label>)}</div></fieldset>}</div></section>
-              <section className={styles.plannerQuestion}><span className={styles.stepNumber}>05</span><div><h3>How long will it last?</h3>
-                <p>We’ll check the forecast across the whole activity.</p><label className={styles.field}>Duration<select value={draft.duration_minutes ?? 60} onChange={(event) => change({ duration_minutes: Number(event.target.value) })}>
+              <section className={styles.plannerQuestion}><span className={styles.stepNumber}>05</span><div><h3>Duration</h3><label className={styles.field}>Duration<select value={draft.duration_minutes ?? 60} onChange={(event) => change({ duration_minutes: Number(event.target.value) })}>
                   {durations.map((value) => <option key={value} value={value}>{value} minutes</option>)}</select></label></div></section>
               <section className={styles.plannerQuestion}><span className={styles.stepNumber}>06</span><div><h3>Forecast alerts</h3>
-                <p>Alerts compare the forecast during this activity with your saved heat and AQI thresholds. You can change those in <a className={styles.inlineLink} href="/settings">Settings</a>.</p>
+                <details className={styles.inlineDetails}><summary>How alerts work</summary><p>Forecasts across this activity are compared with your saved heat and AQI thresholds in <a className={styles.inlineLink} href="/settings">Settings</a>. Browser notifications need permission and an open app.</p></details>
                 <label className={styles.choice}><input type="checkbox" checked={draft.alerts_enabled ?? true} onChange={(event) => change({ alerts_enabled: event.target.checked })} />Alert me about this activity</label>
-                <p className={styles.small}>Browser notifications also need permission in Settings and an open page.</p></div></section>
+                </div></section>
             </div>
             <div className={styles.plannerReview}><p className="section-label">YOUR PLAN AT A GLANCE</p><strong>{summary(draft, prefs)}</strong>
               <span>{draft.alerts_enabled === false ? "Forecast alerts off" : "Forecast alerts on"}</span></div>
