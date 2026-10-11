@@ -83,7 +83,9 @@ Tiger Cloud remains the database. The backend requires an internal token for all
 
 Pushing to `main` runs `.github/workflows/deploy-vercel.yml`: backend tests, API deployment
 with pending database migrations, then frontend deployment. The workflow uses the encrypted
-GitHub repository secret `VERCEL_DEPLOY_TOKEN`, scoped to the `rabeet` Vercel account.
+GitHub repository secrets `VERCEL_API_TOKEN` and `VERCEL_WEB_TOKEN`, each scoped to its
+respective project in the `rabeet` Vercel account. These tokens expire after one year and
+must be replaced in GitHub's repository secrets before they expire.
 Provider keys remain in Vercel's production environment. Feature-branch pushes do not change
 the live site; merge them into `main` to deploy. The workflow can also be run manually from
 the repository's Actions tab. Deployment runs are serialized to keep releases in order.

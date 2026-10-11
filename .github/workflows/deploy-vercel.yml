@@ -17,7 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN }}
+      VERCEL_API_TOKEN: ${{ secrets.VERCEL_API_TOKEN }}
+      VERCEL_WEB_TOKEN: ${{ secrets.VERCEL_WEB_TOKEN }}
       VERCEL_ORG_ID: team_MfbjtVC7nK4BpG7jbfyQGr5W
     steps:
       - uses: actions/checkout@v4
@@ -31,8 +32,8 @@ jobs:
           cache-dependency-path: htx-resilience-hub/apps/api/requirements.txt
       - name: Check deployment credentials
         run: |
-          if [ -z "$VERCEL_TOKEN" ]; then
-            echo "::error::Add the VERCEL_DEPLOY_TOKEN repository secret before deploying."
+          if [ -z "$VERCEL_API_TOKEN" ] || [ -z "$VERCEL_WEB_TOKEN" ]; then
+            echo "::error::Add the VERCEL_API_TOKEN and VERCEL_WEB_TOKEN repository secrets before deploying."
             exit 1
           fi
       - name: Test backend
@@ -60,9 +61,9 @@ jobs:
       - name: Install Vercel CLI
         run: npm install --global vercel@63.1.2
       - name: Deploy API and migrations
-        run: vercel deploy --prod --yes --scope rabeet1 --cwd .deployment/noach-api --token "$VERCEL_TOKEN" --meta gitCommitSha="$GITHUB_SHA"
+        run: vercel deploy --prod --yes --scope rabeet1 --cwd .deployment/noach-api --token "$VERCEL_API_TOKEN" --meta gitCommitSha="$GITHUB_SHA"
       - name: Deploy website
-        run: vercel deploy --prod --yes --scope rabeet1 --cwd .deployment/noach-web --token "$VERCEL_TOKEN" --meta gitCommitSha="$GITHUB_SHA"
+        run: vercel deploy --prod --yes --scope rabeet1 --cwd .deployment/noach-web --token "$VERCEL_WEB_TOKEN" --meta gitCommitSha="$GITHUB_SHA"
       - name: Verify public services
         run: |
           curl --fail --silent --show-error --retry 3 https://noach-api.vercel.app/health
