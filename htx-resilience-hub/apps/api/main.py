@@ -2,6 +2,7 @@
 import asyncio
 import hmac
 import json
+import logging
 import os
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -211,19 +212,25 @@ async def briefing_route(request: Request, user_id: str = Query(min_length=1,max
 @app.post("/api/ask",response_model=AskResponse)
 async def ask(payload: AskRequest, response: Response, request: Request) -> AskResponse:
     user_id = account_user_id(request,payload.user_id or "guest")
+    stage = "briefing"
     try:
         context = await briefing(user_id)
+        stage = "preferences"
         prefs,_ = await get_prefs(user_id)
         context["saved_preferences"] = prefs.model_dump(mode="json",exclude={"user_id"})
+        stage = "conversation history"
         history = await conversation_history(user_id,4) if user_id.startswith("acct:") else [turn.model_dump() for turn in payload.history]
+        stage = "answer generation"
         answer,provider = await gemini_answer(
             payload.question,context,await memory_get(prefs),
             history=[{"question":turn["question"],"answer":turn["answer"]} for turn in history],
         )
+        stage = "conversation save"
         await save_conversation_turn(user_id,payload.question,answer,provider)
         response.headers["X-AI-Provider"] = provider
         return AskResponse(answer=answer)
-    except Exception:
+    except Exception as exc:
+        logging.error("Assistant request failed at stage=%s error_type=%s",stage,type(exc).__name__)
         raise HTTPException(503,"Environmental context unavailable; please retry")
 
 
@@ -232,7 +239,8 @@ async def assistant_history(request: Request, user_id: str = Query(min_length=1,
     user_id = account_user_id(request,user_id)
     try:
         return await conversation_history(user_id,before_id=before)
-    except Exception:
+    except Exception as exc:
+        logging.error("Assistant history failed error_type=%s",type(exc).__name__)
         raise HTTPException(503,"Conversation history unavailable")
 
 @app.get("/api/alerts")

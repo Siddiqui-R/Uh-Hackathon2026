@@ -1,4 +1,5 @@
 "use client";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import RecommendationCard from "@/components/RecommendationCard";
 import { forecastTime, forecastFreshness } from "@/lib/forecastPresentation";
@@ -7,8 +8,11 @@ import FeatureFrame from "./FeatureFrame";
 import ForecastTrends from "./ForecastTrends";
 import styles from "./features.module.css";
 
+const ConditionsMap = dynamic(() => import("@/components/ConditionsMap"), { ssr: false, loading: () => <div className="map-loading" role="status">Loading Houston map…</div> });
+
 export default function RecommendationExperience() {
   const [briefing, setBriefing] = useState<Briefing | null>(null), [prefs, setPrefs] = useState<UserPrefs | null>(null), [loading, setLoading] = useState(true), [error, setError] = useState("");
+  const [prefsError, setPrefsError] = useState("");
   async function load(quiet = false) {
     if (!quiet) setLoading(true);
     setError("");
@@ -16,19 +20,26 @@ export default function RecommendationExperience() {
       const [b, p] = await Promise.allSettled([fetch("/api/briefing", { cache: "no-store" }), fetch("/api/prefs", { cache: "no-store" })]);
       if (b.status === "fulfilled" && b.value.ok) setBriefing(await b.value.json() as Briefing);
       else setError(b.status === "fulfilled" && b.value.status === 401 ? "Your session expired. Sign in again to see your recommendations." : "Recommendations are unavailable. Try again when forecast data is ready.");
-      if (p.status === "fulfilled" && p.value.ok) setPrefs((await p.value.json() as { preferences: UserPrefs }).preferences);
+      if (p.status === "fulfilled" && p.value.ok) {
+        setPrefs((await p.value.json() as { preferences: UserPrefs }).preferences);
+        setPrefsError("");
+      } else {
+        setPrefs(null);
+        setPrefsError("Saved places are unavailable. Reload to explore conditions on the map.");
+      }
     } catch { setError("Recommendations could not be read. Try again shortly."); }
     finally { setLoading(false); }
   }
   useEffect(() => { void load(); const timer = setInterval(() => void load(true), 60_000); return () => clearInterval(timer); }, []);
-  // Cards render after data arrives, so bring a linked activity (#activity-id) into view once.
+  // Linked activities and the map render after data arrives, so bring the target into view once.
   const scrolled = useRef(false);
   useEffect(() => {
-    if (scrolled.current || !briefing || !window.location.hash.startsWith("#activity-")) return;
+    const hash = window.location.hash;
+    if (scrolled.current || loading || (hash === "#map" ? !prefs : !briefing || !hash.startsWith("#activity-"))) return;
     scrolled.current = true;
-    const target = document.getElementById(decodeURIComponent(window.location.hash.slice(1)));
+    const target = document.getElementById(decodeURIComponent(hash.slice(1)));
     target?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
-  }, [briefing]);
+  }, [briefing, prefs, loading]);
   const outdoor = briefing?.recommendations.filter((card) => card.category === "outdoor") ?? [];
   const supporting = briefing?.recommendations.filter((card) => card.category !== "outdoor") ?? [];
   return <FeatureFrame path="/recommendations" eyebrow="PLAN WITH EVIDENCE" title="Activity recommendations" description="Check your scheduled activities." planningPrefs={prefs}>
@@ -41,6 +52,11 @@ export default function RecommendationExperience() {
           {!outdoor.length && <p className={styles.empty}>No upcoming activity windows. Check your saved dates or plan another activity.</p>}
           <div className={`${styles.outlookList} recommendations`}>{outdoor.map((card) => <RecommendationCard card={card} timezone={briefing.timezone} key={card.id} />)}</div>
         </section>
+      </>}
+      {!loading && <section id="map" className={`${styles.outlookSection} map-section`}><div className="section-heading"><div><p className="section-label">FIELD MAP / HOUSTON</p><h2>Explore conditions</h2></div><span className="tiny">Select a place or drop a pin.</span></div>
+        {prefs ? <ConditionsMap readings={briefing?.hazards ?? []} prefs={prefs} grid={briefing?.grid} gaugeMode={briefing?.source_status.flood} /> : <div className={styles.empty} role="status">{prefsError || "Loading saved places…"} <button className={styles.quiet} onClick={() => void load()}>Retry</button></div>}
+      </section>}
+      {!loading && briefing && <>
         <details className={styles.sourceIndex}><summary>Forecast library <span>{briefing.forecasts.length} places · sources and hourly trends</span></summary><p className={styles.small}>Modeled forecasts / separate from AirNow and USGS observations. Briefing assembled {forecastTime(briefing.generated_at, briefing.timezone)}.</p>
           {!briefing.forecasts.length && <p className={styles.empty}>Forecast snapshots are unavailable.</p>}
           <div className={styles.outlookList}>{briefing.forecasts.map((forecast) => {

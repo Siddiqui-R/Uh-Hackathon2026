@@ -121,10 +121,15 @@ async def set_alert_read(user_id: str, alert_id: int, read: bool) -> tuple[bool,
 async def conversation_history(user_id: str, limit: int = 20, before_id: int | None = None) -> list[dict[str, Any]]:
     if not user_id.startswith("acct:"):
         return []
+    where = "WHERE user_id=%s"
+    params: list[Any] = [user_id]
+    if before_id is not None:
+        where += " AND id<%s"
+        params.append(before_id)
+    params.append(min(limit, 20))
     async with connection() as conn:
-        rows = await (await conn.execute("""SELECT id,question,answer,provider,created_at FROM conversation_turns
-            WHERE user_id=%s AND (%s IS NULL OR id<%s) ORDER BY id DESC LIMIT %s""",
-            (user_id, before_id, before_id, min(limit, 20)))).fetchall()
+        rows = await (await conn.execute(f"""SELECT id,question,answer,provider,created_at FROM conversation_turns
+            {where} ORDER BY id DESC LIMIT %s""", params)).fetchall()
     return [{**row, "created_at": row["created_at"].isoformat()} for row in reversed(rows)]
 
 

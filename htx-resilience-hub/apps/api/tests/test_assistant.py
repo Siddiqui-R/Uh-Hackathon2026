@@ -2,6 +2,7 @@
 import asyncio
 import os
 import unittest
+from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -17,7 +18,7 @@ from apps.api.workers import alert_candidates
 from apps.api.ingest.flood import parse_readings, write_readings, INSERT_SQL
 from apps.api.main import app
 from apps.api.providers import gemini_answer
-from apps.api.store import get_prefs, DEMO_PREFS
+from apps.api.store import get_prefs, conversation_history, DEMO_PREFS
 
 UTC = timezone.utc
 NOW = datetime(2026,10,10,21,30,tzinfo=UTC)
@@ -138,6 +139,25 @@ class EnvironmentalTests(unittest.TestCase):
         self.assertTrue(any(abs(lat-29.76) < .06 and abs(lon+95.37) < .07 for lat,lon in cells))
 
 class ProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_account_history_query_omits_null_cursor_and_paginates(self) -> None:
+        cursor = SimpleNamespace(fetchall=AsyncMock(return_value=[]))
+        conn = SimpleNamespace(execute=AsyncMock(return_value=cursor))
+
+        @asynccontextmanager
+        async def fake_connection():
+            yield conn
+
+        with patch("apps.api.store.connection", fake_connection):
+            self.assertEqual(await conversation_history("acct:alice"), [])
+            query, params = conn.execute.await_args.args
+            self.assertNotIn("IS NULL", query)
+            self.assertEqual(params, ["acct:alice", 20])
+
+            self.assertEqual(await conversation_history("acct:alice", before_id=42), [])
+            query, params = conn.execute.await_args.args
+            self.assertIn("id<%s", query)
+            self.assertEqual(params, ["acct:alice", 42, 20])
+
     async def test_point_rehomes_routines_to_pin(self) -> None:
         grid = {"status":"live","severity":"normal","title":"Normal","note":"","reserves_mw":None,"updated":None,"source_url":"https://www.ercot.com"}
         pinned = {**snapshot(),"retrieved_at":datetime.now(UTC).isoformat()}

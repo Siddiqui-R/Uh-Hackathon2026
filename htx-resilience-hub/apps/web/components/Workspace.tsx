@@ -15,7 +15,6 @@ import { localTime } from "@/lib/format";
 import type { AirStation, AnomalyEvent, Briefing, EnvironmentalAlert, HazardReading, Operations, UserPrefs } from "@/lib/types";
 
 const HazardMap = dynamic(() => import("@/components/HazardMap"), { ssr: false, loading: () => <div className="map-loading">Loading Houston map…</div> });
-const ConditionsMap = dynamic(() => import("@/components/ConditionsMap"), { ssr: false, loading: () => <div className="map-loading">Loading Houston map…</div> });
 function featuredGauge(rows: HazardReading[]): HazardReading | undefined {
   return rows.filter((row) => row.metric.toLowerCase().includes("gage height") && row.unit === "ft")
     .sort((left, right) => Date.parse(right.time) - Date.parse(left.time))[0];
@@ -289,11 +288,9 @@ export default function Workspace({ page, returnToPlanner = false }: { page: Wor
         </section>}
       {page === "places" && prefsLoaded && <div className="settings-anchor"><PreferencesEditor value={prefs} onSave={save} section="places" />
         {returnToPlanner && <p className="notice"><a href="/routines">← Back to the activity planner</a> after saving your place.</p>}</div>}
+      {page === "places" && prefsLoaded && <p className="planning-next"><span>Want to see the conditions around a place?</span><a href="/recommendations#map">Explore the map on Outlook →</a></p>}
       {page === "routines" && <div className="settings-anchor"><PreferencesEditor value={prefs} onSave={save} section="routines" /></div>}
       {page === "places" && !prefsLoaded && <p className={prefsError ? "notice" : "loading-line"} role="status">{!prefsError && <span className="spinner" aria-hidden />}{prefsError ? "Saved places unavailable. Try reloading." : "Loading saved places…"}</p>}
-      {page === "places" && prefsLoaded && <section id="map" className="map-section"><div className="section-heading"><div><p className="section-label">FIELD MAP / HOUSTON</p><h2>Explore conditions</h2></div><span className="tiny">Select a place or drop a pin.</span></div>
-        <ConditionsMap readings={view?.hazards ?? []} prefs={prefs} grid={grid} gaugeMode={view?.source_status.flood} />
-      </section>}
       {page === "monitor" && <section id="monitor" className="monitor-section"><div className="section-heading"><div><p className="section-label">WATCHING FOR CHANGE</p><h2>Live environmental monitor</h2></div><span className="tag"><span className="live-dot" /> {monitorStatus}</span></div>
         <div className="monitor-grid"><div className="panel monitor-map"><HazardMap readings={view?.hazards ?? []} locations={prefs.locations} anomalies={anomalies} airStations={airStations} /><Sparkline points={history} /><p className="tiny">{view?.coverage}</p></div>
           <div className="panel event-panel"><div className="panel-heading"><div><p className="section-label">STATION SIGNALS</p><h3>Unusual readings</h3></div><span className="tag">{anomalies.length} recorded</span></div>
