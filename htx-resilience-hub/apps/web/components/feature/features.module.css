@@ -70,3 +70,6 @@
 @media(prefers-reduced-motion:reduce){.loading{background:#e9eee6}.activityItem:hover{background:transparent}}
 @keyframes noach-rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}@keyframes noach-shimmer{from{background-position:120% 0}to{background-position:-120% 0}}
 .sourceIndex>summary>span{margin-left:auto}.sourceIndex>summary::after{content:"";flex:none;align-self:center;width:6px;height:6px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:translateY(-2px) rotate(45deg);transition:transform .28s cubic-bezier(.2,.7,.2,1)}.sourceIndex[open]>summary::after{transform:translateY(1px) rotate(-135deg)}
+
+/* Day view: the Golden Window opens under an activity once it is selected. */
+.dayView{margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}.dayView>button{padding:9px 16px;cursor:pointer;font:inherit;font-weight:700}
