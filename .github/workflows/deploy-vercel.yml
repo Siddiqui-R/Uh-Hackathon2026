@@ -61,8 +61,12 @@ jobs:
       - name: Install Vercel CLI
         run: npm install --global vercel@63.1.2
       - name: Deploy API and migrations
+        env:
+          VERCEL_PROJECT_ID: prj_N79AGdyovI3DS84sDq4P0pFG4weK
         run: vercel deploy --prod --yes --cwd .deployment/noach-api --token "$VERCEL_API_TOKEN" --meta gitCommitSha="$GITHUB_SHA"
       - name: Deploy website
+        env:
+          VERCEL_PROJECT_ID: prj_XAspuBcfX5kTtDBh7foPiX8p1l3K
         run: vercel deploy --prod --yes --cwd .deployment/noach-web --token "$VERCEL_WEB_TOKEN" --meta gitCommitSha="$GITHUB_SHA"
       - name: Verify public services
         run: |
